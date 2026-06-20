@@ -76,7 +76,10 @@ class LauncherBackend:
             "save_repo_settings": save_repo_settings,
             "read_dev_settings": read_dev_settings,
             "save_dev_settings": save_dev_settings,
-            "install_launcher_update": lambda: install_launcher_update(self.schedule_exit),
+            "install_launcher_update": lambda allow_downgrade=False: install_launcher_update(
+                self.schedule_exit,
+                allow_downgrade,
+            ),
             "check_environment": check_environment,
             "launch_game": launch_game,
             "choose_scan_root": choose_scan_root,

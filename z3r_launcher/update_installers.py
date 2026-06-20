@@ -33,14 +33,14 @@ from .update_downloads import (
 from .update_scripts import write_appimage_update_script, write_macos_update_script, write_windows_update_script
 
 
-def install_launcher_update(schedule_exit: Callable[[], None]) -> dict[str, Any]:
+def install_launcher_update(schedule_exit: Callable[[], None], allow_downgrade: bool = False) -> dict[str, Any]:
     current_version = current_update_version()
     update_dir = update_work_dir()
     update_dir.mkdir(parents=True, exist_ok=True)
     release = fetch_latest_release(update_dir)
     ordering = compare_versions(release["tag_name"], current_version)
-    if ordering < 0:
-        return action_result(True, f"Launcher {current_version} is newer than the latest published release {release['tag_name']}.")
+    if ordering < 0 and not allow_downgrade:
+        return downgrade_confirmation_result(current_version, release["tag_name"])
     if ordering == 0:
         return action_result(True, f"Launcher is already up to date ({current_version}).")
     if is_flatpak_runtime():
@@ -52,6 +52,22 @@ def install_launcher_update(schedule_exit: Callable[[], None]) -> dict[str, Any]
     if is_linux():
         return install_appimage_update(release, update_dir, schedule_exit)
     raise LauncherError("Launcher updates are not packaged for this operating system yet.")
+
+
+def downgrade_confirmation_result(current_version: str, release_version: str) -> dict[str, Any]:
+    message = (
+        f"Launcher {current_version} is newer than the selected update release {release_version}."
+    )
+    result = action_result(False, message)
+    result.update({
+        "confirmation_required": True,
+        "confirmation_prompt": (
+            f"{message}\n\nDownload and install {release_version} anyway?"
+        ),
+        "current_version": current_version,
+        "release_version": release_version,
+    })
+    return result
 
 
 def install_windows_update(release: dict[str, Any], update_dir: Path, schedule_exit: Callable[[], None]) -> dict[str, Any]:
