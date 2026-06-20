@@ -14,6 +14,18 @@ PALETTE_ROWS = ["Green Mail", "Blue Mail", "Red Mail", "Bunny", "Burning"]
 PALETTE_COLOR_MASK = 0xFFFF
 # The asset compiler writes armor palette entries as uint16 values, with SNES color data in the low 15 bits.
 PALETTE_STORAGE_MASK = 0x8000
+DEFAULT_LINK_ARMOR_PALETTE = [
+    0x7FFF, 0x237E, 0x11B7, 0x369E, 0x14A5, 0x01FF, 0x1078, 0x599D,
+    0x3647, 0x3B68, 0x0A4A, 0x12EF, 0x2A5C, 0x1571, 0x7A18,
+    0x7FFF, 0x237E, 0x11B7, 0x369E, 0x14A5, 0x01FF, 0x1078, 0x599D,
+    0x6980, 0x7691, 0x26B8, 0x437F, 0x2A5C, 0x1199, 0x7A18,
+    0x7FFF, 0x237E, 0x11B7, 0x369E, 0x14A5, 0x01FF, 0x1078, 0x599D,
+    0x1057, 0x457E, 0x6DF3, 0xFEB9, 0x2A5C, 0x2227, 0x7A18,
+    0x7FFF, 0x237E, 0x11B7, 0x369E, 0x14A5, 0x01FF, 0x1078, 0x3D97,
+    0x3647, 0x3B68, 0x0A4A, 0x12EF, 0x567E, 0x1571, 0x7A18,
+    0x0000, 0x0EFA, 0x7DD1, 0x0000, 0x7F1A, 0x7F1A, 0x0000, 0x716E,
+    0x7DD1, 0x40A7, 0x7DD1, 0x40A7, 0x48E9, 0x50CF, 0x7FFF,
+]
 
 
 class LinkSpritePaletteError(ValueError):
@@ -28,9 +40,8 @@ def read_link_sprite_palette(project: Path) -> dict[str, Any]:
     commented_values = parse_palette_assignment(region.commented_source) if region.commented_source else None
     active = active_values is not None
     values = active_values if active_values is not None else commented_values
-
     if values is None:
-        raise LinkSpritePaletteError("No editable Link armor palette list was found in assets/sprite_sheets.py.")
+        values = DEFAULT_LINK_ARMOR_PALETTE
 
     normalized = normalize_palette_values(values)
     return {
@@ -84,15 +95,14 @@ def find_palette_region(lines: list[str]) -> PaletteRegion:
             continue
         end = palette_block_end(lines, index)
         source = "\n".join(lines[index:end])
-        commented_source = commented_assignment_source(source) if line.lstrip().startswith("#") else None
-        active_source = source if commented_source is None else None
-
-        if active_source is None:
-            active_index = next_active_assignment(lines, end)
-            if active_index is not None:
-                active_end = palette_block_end(lines, active_index)
-                active_source = "\n".join(lines[active_index:active_end])
-                end = active_end
+        active_source, commented_source = palette_sources(line, source)
+        if active_source is None and commented_source is None:
+            template_index = next_palette_list_assignment(lines, end)
+            if template_index is not None:
+                template_end = palette_block_end(lines, template_index)
+                template_source = "\n".join(lines[template_index:template_end])
+                active_source, commented_source = palette_sources(lines[template_index], template_source)
+                end = template_end
 
         return PaletteRegion(index, end, active_source, commented_source)
 
@@ -103,15 +113,13 @@ def assignment_line_matches(line: str) -> bool:
     stripped = line.lstrip()
     if stripped.startswith("#"):
         stripped = stripped[1:].lstrip()
-    return stripped.startswith(f"{PALETTE_ASSIGNMENT} =")
+    return re.match(rf"{re.escape(PALETTE_ASSIGNMENT)}\s*=", stripped) is not None
 
 
-def next_active_assignment(lines: list[str], start: int) -> int | None:
+def next_palette_list_assignment(lines: list[str], start: int) -> int | None:
     for index in range(start, len(lines)):
         stripped = lines[index].lstrip()
-        if stripped.startswith("#"):
-            continue
-        if stripped.startswith(f"{PALETTE_ASSIGNMENT} ="):
+        if assignment_line_matches(lines[index]) and assignment_starts_list(lines[index]):
             return index
         if stripped and not stripped.startswith("#"):
             return None
@@ -119,6 +127,9 @@ def next_active_assignment(lines: list[str], start: int) -> int | None:
 
 
 def palette_block_end(lines: list[str], start: int) -> int:
+    if not assignment_starts_list(lines[start]):
+        return start + 1
+
     depth = 0
     saw_open = False
     for index in range(start, len(lines)):
@@ -130,6 +141,27 @@ def palette_block_end(lines: list[str], start: int) -> int:
         if saw_open and depth <= 0:
             return index + 1
     raise LinkSpritePaletteError("override_armor_palette list is missing its closing bracket.")
+
+
+def palette_sources(line: str, source: str) -> tuple[str | None, str | None]:
+    if not source_defines_palette_list(source):
+        return None, None
+    if line.lstrip().startswith("#"):
+        return None, commented_assignment_source(source)
+    return source, None
+
+
+def assignment_starts_list(line: str) -> bool:
+    content = uncomment_assignment_line(line)
+    _key, separator, value = content.partition("=")
+    return bool(separator and value.lstrip().startswith("["))
+
+
+def source_defines_palette_list(source: str) -> bool:
+    for line in source.splitlines():
+        if assignment_line_matches(line):
+            return assignment_starts_list(line)
+    return False
 
 
 def uncomment_assignment_line(line: str) -> str:
@@ -149,7 +181,7 @@ def parse_palette_assignment(source: str | None) -> list[Any] | None:
         return None
 
     sanitized = strip_palette_row_comments(source)
-    match = re.search(rf"{PALETTE_ASSIGNMENT}\s*=\s*(\[.*\])", sanitized, re.DOTALL)
+    match = re.search(rf"^\s*{PALETTE_ASSIGNMENT}\s*=\s*(\[.*\])", sanitized, re.DOTALL | re.MULTILINE)
     if not match:
         return None
 
@@ -214,6 +246,7 @@ def format_palette_block(values: list[int], active: bool) -> list[str]:
         return [f"{PALETTE_ASSIGNMENT} = [", *format_palette_rows(values, ""), "]"]
 
     return [
+        f"{PALETTE_ASSIGNMENT} = None",
         f"#{PALETTE_ASSIGNMENT} = [",
         *format_palette_rows(values, "#"),
         "#]",
