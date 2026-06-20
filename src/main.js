@@ -14,6 +14,7 @@ import { connectRepoUpdateManager } from "./repo-update-manager.js";
 import { connectLauncherUpdateChecker } from "./launcher-update-checker.js";
 import { connectDevSettings } from "./dev-settings.js";
 import { collectAppElements } from "./app-elements.js";
+import { createActivityDrawer } from "./activity-drawer.js";
 import { createRomUploader } from "./rom-upload.js";
 import {
   connectScanPathManager,
@@ -44,14 +45,8 @@ const state = {
 };
 
 const elements = collectAppElements();
-
-// Timestamped activity console entry used by every screen for command output and
-// non-fatal warnings. Keeps the log entries consistent and auto-scrolls to bottom.
-function log(message) {
-  const now = new Date().toLocaleTimeString();
-  elements.logOutput.textContent += `\n[${now}] ${message}`;
-  elements.logOutput.scrollTop = elements.logOutput.scrollHeight;
-}
+const activityDrawer = createActivityDrawer(elements);
+const log = activityDrawer.log;
 
 // Safe backend invoker that routes backend errors into the activity log AND re-throws so
 // callers can guard their own UI flow when needed.
@@ -277,6 +272,7 @@ const helpers = {
   refreshScan,
   runAction,
   selectedProjectPayload,
+  refreshActivityUpdateInfo: activityDrawer.refreshUpdateInfo,
 };
 
 // Each connect*() returns a small object the bootstrap calls into (render/refresh).
@@ -290,14 +286,11 @@ helpers.openRepoUpdate = repoUpdateManager.open;
 connectScanPathManager(helpers);
 connectLauncherUpdateChecker(helpers);
 connectDevSettings(helpers);
+activityDrawer.connect(call);
 
 elements.refreshButton.addEventListener("click", refreshScan);
 elements.backButton.addEventListener("click", () => showView("builds"));
 elements.guideBackButton.addEventListener("click", () => showView("environment"));
-elements.activityToggle.addEventListener("click", () => {
-  const isOpen = elements.activityPanel.classList.toggle("open");
-  elements.activityToggle.setAttribute("aria-expanded", String(isOpen));
-});
 elements.checkButton.addEventListener("click", environmentScreen.runChecks);
 elements.uploadRomButton.addEventListener("click", async () => {
   elements.uploadRomButton.disabled = true;
@@ -329,9 +322,6 @@ connectRandomizerSetup({
   refreshScan,
   runAction,
   selectedProjectPayload,
-});
-elements.clearLogButton.addEventListener("click", () => {
-  elements.logOutput.textContent = "Ready.";
 });
 elements.venvButton.addEventListener("click", async () => {
   const payload = selectedProjectPayload();
@@ -389,6 +379,7 @@ elements.environmentPlayButton.addEventListener("click", async () => {
 showView(state.activeView);
 await loadSetupGuidance();
 await loadGuideContent();
+await activityDrawer.refreshUpdateInfo();
 await loadRuntimeInfo();
 await loadSavedRepoSettings(helpers);
 await refreshRomStatus();

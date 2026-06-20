@@ -135,6 +135,7 @@ async function saveDevSettings(helpers) {
       launcherUpdateApiUrl: elements.devUpdatePathInput.value,
     });
     applyDevSettingsSnapshot(snapshot, helpers);
+    await helpers.refreshActivityUpdateInfo?.();
     elements.devSettingsStatus.textContent = snapshot.message;
     log(snapshot.message);
   } catch (error) {
@@ -152,6 +153,7 @@ async function resetDevSettings(helpers) {
       launcherUpdateApiUrl: "",
     });
     applyDevSettingsSnapshot(snapshot, helpers);
+    await helpers.refreshActivityUpdateInfo?.();
     elements.devSettingsStatus.textContent = snapshot.message;
     log(snapshot.message);
   } catch (error) {
