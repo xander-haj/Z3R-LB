@@ -3,6 +3,7 @@
 // with assets/restool.py without extracting fresh ROM assets over the edit.
 
 import { createLinkSpritePreview } from "./preview.js";
+import { renderSpriteSelector } from "./sprite-selector.js";
 
 const EMPTY_MESSAGE = "Select or clone a Z3R folder before opening Link Sprite.";
 const UNAVAILABLE_MESSAGE = "Link sprite palette editing is unavailable for this project.";
@@ -52,6 +53,7 @@ async function refreshLinkSpriteEditor(refs, helpers) {
     const snapshot = await helpers.call("read_link_sprite_palette", {
       projectPath: helpers.state.selectedPath,
     });
+    await renderSpriteSelector(refs.content, helpers, () => refreshLinkSpriteEditor(refs, helpers));
     renderEditor(refs, snapshot, helpers);
   } catch (error) {
     helpers.log(`Could not read Link sprite palette: ${error}`);
@@ -76,6 +78,7 @@ function renderEditor(refs, snapshot, helpers) {
   const editorState = {
     values: [...snapshot.values],
     active: Boolean(snapshot.active),
+    source: snapshot.palette_source ?? "",
     dirty: false,
     busy: false,
   };
@@ -90,6 +93,7 @@ function renderEditor(refs, snapshot, helpers) {
       <button class="secondary-button link-sprite-reload" type="button">Reload</button>
     </div>
     <p class="path-line link-sprite-path"></p>
+    <p class="path-line link-sprite-palette-source"></p>
     <p class="link-sprite-preview-status">Loading sprite preview...</p>
     <div class="link-palette-grid"></div>
     <div class="link-sprite-actions">
@@ -104,12 +108,13 @@ function renderEditor(refs, snapshot, helpers) {
   const status = editor.querySelector(".link-sprite-status");
   const previewStatus = editor.querySelector(".link-sprite-preview-status");
   editor.querySelector(".link-sprite-path").textContent = snapshot.path;
+  editor.querySelector(".link-sprite-palette-source").textContent = paletteSourceText(snapshot);
   const preview = createLinkSpritePreview(snapshot, editorState, previewStatus);
   editorState.preview = preview;
   refs.preview = preview;
   appendPaletteRows(editor.querySelector(".link-palette-grid"), snapshot, editorState, status, preview);
   const controls = collectEditorControls(editor);
-  updateActiveState(statePill, editorState.active);
+  updateActiveState(statePill, editorState.active, editorState.source);
   wireEditorActions(controls, refs, helpers, editorState, status, statePill);
   refs.content.append(editor);
   preview.load(helpers).catch((error) => {
@@ -255,8 +260,9 @@ async function savePalette(controls, helpers, editorState, status, statePill, ac
     });
     editorState.values = [...snapshot.values];
     editorState.active = Boolean(snapshot.active);
+    editorState.source = snapshot.palette_source ?? "";
     editorState.dirty = false;
-    updateActiveState(statePill, editorState.active);
+    updateActiveState(statePill, editorState.active, editorState.source);
     helpers.log(snapshot.message);
     showActionStatus(status, snapshot.message, "success");
   };
@@ -290,9 +296,20 @@ function setControlsDisabled(controls, disabled) {
 }
 
 // Updates the active/disabled status pill shown above the palette grid.
-function updateActiveState(node, active) {
-  node.className = `link-sprite-state ${active ? "active" : "disabled"}`;
-  node.textContent = active ? "Override active" : "Override disabled";
+function updateActiveState(node, active, source = "") {
+  const usesZspr = source === "zspr";
+  node.className = `link-sprite-state ${active || usesZspr ? "active" : "disabled"}`;
+  node.textContent = usesZspr ? "ZSPR palette" : (active ? "Override active" : "Override disabled");
+}
+
+function paletteSourceText(snapshot) {
+  if (snapshot.palette_source === "zspr") {
+    return `Palette source: selected ZSPR (${snapshot.palette_source_path})`;
+  }
+  if (snapshot.palette_source_error) {
+    return snapshot.palette_source_error;
+  }
+  return `Palette source: ${snapshot.active ? "assets override" : "asset defaults"}`;
 }
 
 // Shows a compact action result under the editor buttons.

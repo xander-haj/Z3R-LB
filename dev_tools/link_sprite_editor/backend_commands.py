@@ -11,7 +11,7 @@ from z3r_launcher.project_files import rom_storage_dir, venv_python
 
 from .compiled_preview import LinkSpritePreviewError, read_compiled_link_graphics
 from .palette import LinkSpritePaletteError, read_link_sprite_palette, write_link_sprite_palette
-from .zspr import parse_zspr_preview
+from .zspr import parse_zspr_palette_words, parse_zspr_preview, write_zspr_palette_words
 
 
 def read_link_sprite_preview(project_path: str) -> dict[str, Any]:
@@ -50,7 +50,7 @@ def read_link_sprite_zspr_preview(project: Path, sprite_path: str) -> dict[str, 
 
 def read_link_sprite_palette_command(project_path: str) -> dict[str, Any]:
     try:
-        return read_link_sprite_palette(Path(project_path))
+        return read_palette_snapshot(Path(project_path))
     except LinkSpritePaletteError as error:
         raise LauncherError(str(error)) from error
     except OSError as error:
@@ -58,14 +58,79 @@ def read_link_sprite_palette_command(project_path: str) -> dict[str, Any]:
 
 
 def save_link_sprite_palette(project_path: str, values: list[Any], active: bool = True) -> dict[str, Any]:
+    project = Path(project_path)
     try:
-        snapshot = write_link_sprite_palette(Path(project_path), values, active)
+        snapshot = write_link_sprite_palette(project, values, active)
+        if active:
+            write_active_zspr_palette(project, snapshot["values"])
+        snapshot = read_palette_snapshot(project)
     except LinkSpritePaletteError as error:
         raise LauncherError(str(error)) from error
     except OSError as error:
         raise LauncherError(f"Could not write Link sprite palette: {error}") from error
-    snapshot["message"] = "Link sprite palette override saved." if active else "Link sprite palette override disabled."
+    if active and snapshot.get("palette_source") == "zspr":
+        snapshot["message"] = "Link sprite palette saved to the selected ZSPR and asset override."
+    else:
+        snapshot["message"] = (
+            "Link sprite palette override saved."
+            if active
+            else "Link sprite palette override disabled."
+        )
     return snapshot
+
+
+def read_palette_snapshot(project: Path) -> dict[str, Any]:
+    snapshot = read_link_sprite_palette(project)
+    snapshot["palette_source"] = "asset_override" if snapshot["active"] else "asset_default"
+    snapshot["palette_source_path"] = snapshot["path"]
+
+    try:
+        zspr_path = active_zspr_file(project, require_existing=True)
+    except LauncherError as error:
+        snapshot["palette_source_error"] = f"Could not read selected ZSPR palette: {error}"
+        return snapshot
+
+    if not zspr_path:
+        return snapshot
+
+    try:
+        zspr_words = parse_zspr_palette_words(zspr_path.read_bytes())
+    except (LauncherError, OSError) as error:
+        snapshot["palette_source_error"] = f"Could not read selected ZSPR palette: {error}"
+        return snapshot
+
+    snapshot["values"] = zspr_words + snapshot["values"][len(zspr_words):]
+    snapshot["palette_source"] = "zspr"
+    snapshot["palette_source_path"] = display_path(zspr_path)
+    return snapshot
+
+
+def write_active_zspr_palette(project: Path, values: list[int]) -> None:
+    zspr_path = active_zspr_file(project, require_existing=True)
+    if not zspr_path:
+        return
+
+    try:
+        data = zspr_path.read_bytes()
+        zspr_path.write_bytes(write_zspr_palette_words(data, values))
+    except OSError as error:
+        raise LauncherError(f"Could not write selected ZSPR palette {display_path(zspr_path)}: {error}") from error
+
+
+def active_zspr_file(project: Path, require_existing: bool = False) -> Path | None:
+    link_graphics = active_ini_value(project, "Graphics", "LinkGraphics")
+    if not link_graphics:
+        return None
+
+    relative = safe_relative_path(link_graphics)
+    if relative.suffix.lower() != ".zspr":
+        return None
+
+    storage = rom_storage_dir()
+    zspr_path = next((path for path in (project / relative, storage / relative) if path.is_file()), None)
+    if zspr_path or not require_existing:
+        return zspr_path
+    raise LauncherError(f"Active LinkGraphics sprite was not found: {display_path(relative)}")
 
 
 def build_link_sprite_assets(project_path: str) -> dict[str, Any]:

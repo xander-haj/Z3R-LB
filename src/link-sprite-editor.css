@@ -22,6 +22,10 @@
   gap: 14px;
 }
 
+.link-sprite-picker-section {
+  max-width: 720px;
+}
+
 .link-sprite-editor {
   display: grid;
   gap: 14px;
@@ -80,12 +84,15 @@
 
 .link-palette-grid {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
+  align-items: start;
 }
 
 .link-palette-row {
   display: grid;
   gap: 8px;
+  min-width: 0;
 }
 
 .link-palette-row h4 {
@@ -95,14 +102,14 @@
 
 .link-palette-row-body {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 176px;
+  grid-template-columns: minmax(0, 1fr) 156px;
   gap: 12px;
   align-items: stretch;
 }
 
 .link-palette-cells {
   display: grid;
-  grid-template-columns: repeat(15, minmax(48px, 1fr));
+  grid-template-columns: repeat(5, minmax(42px, 1fr));
   gap: 7px;
 }
 
@@ -232,8 +239,12 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .link-palette-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .link-palette-cells {
-    grid-template-columns: repeat(auto-fit, minmax(48px, 1fr));
+    grid-template-columns: repeat(5, minmax(42px, 1fr));
   }
 
   .link-sprite-actions {
