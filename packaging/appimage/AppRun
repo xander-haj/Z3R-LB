@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+
+appdir="${APPDIR:-$(dirname "$(readlink -f "$0")")}"
+
+export APPDIR="${appdir}"
+export PATH="${appdir}/usr/bin:${PATH:-}"
+export Z3R_LAUNCHER_APPIMAGE_OPEN_BROWSER=1
+
+exec "${appdir}/usr/bin/z3r-launcher" "$@"

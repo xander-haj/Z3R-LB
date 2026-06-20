@@ -1,0 +1,331 @@
+name: Build Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  build-python:
+    name: Python package on ${{ matrix.name }}
+    permissions:
+      contents: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            platform: ubuntu-22.04
+            artifact_name: linux-x64
+            family: linux
+          - name: Windows x64
+            platform: windows-2022
+            artifact_name: windows-x64
+            family: windows
+          - name: macOS Intel
+            platform: macos-15-intel
+            artifact_name: macos-intel
+            family: macos
+            dmg_name: Z3R-Launcher-macos-intel.dmg
+          - name: macOS Apple Silicon
+            platform: macos-15
+            artifact_name: macos-apple-silicon
+            family: macos
+            dmg_name: Z3R-Launcher-macos-apple-silicon.dmg
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Python
+        if: matrix.family != 'linux'
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Stamp release metadata
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          metadata_python="python"
+          if [ "${{ matrix.family }}" = "linux" ]; then
+            metadata_python="/usr/bin/python3"
+          fi
+          "${metadata_python}" - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path("resources/build-info.json")
+          path.write_text(json.dumps({
+              "release_tag": os.environ.get("RELEASE_TAG", ""),
+              "build_sha": os.environ.get("RELEASE_SHA", ""),
+          }, indent=2) + "\n")
+          PY
+
+      - name: Install Linux packaging dependencies
+        if: matrix.family == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            curl \
+            file \
+            libfuse2 \
+            python3-venv \
+            wget \
+            xz-utils
+
+      - name: Install Windows packaging dependencies
+        if: matrix.family == 'windows'
+        shell: pwsh
+        run: choco install nsis -y
+
+      - name: Prepare bundled Windows toolkit
+        if: matrix.family == 'windows'
+        shell: pwsh
+        timeout-minutes: 45
+        run: ./scripts/prepare-windows-toolkit.ps1
+
+      - name: Verify bundled Windows toolkit
+        if: matrix.family == 'windows'
+        shell: pwsh
+        run: ./scripts/verify-windows-toolkit.ps1
+
+      - name: Install Linux PyInstaller packaging dependencies
+        if: matrix.family == 'linux'
+        shell: bash
+        run: |
+          /usr/bin/python3 -m venv --system-site-packages .packaging-venv
+          .packaging-venv/bin/python -m pip install --upgrade pip pyinstaller certifi
+
+      - name: Install PyInstaller packaging dependencies
+        if: matrix.family != 'linux'
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip pyinstaller certifi
+          python -m pip install --upgrade "pywebview==6.2.1"
+
+      - name: Build Linux Python executable
+        if: matrix.family == 'linux'
+        shell: bash
+        run: .packaging-venv/bin/python -m PyInstaller --clean packaging/pyinstaller/z3r-launcher.spec
+
+      - name: Build Python executable
+        if: matrix.family != 'linux'
+        shell: bash
+        run: python -m PyInstaller --clean packaging/pyinstaller/z3r-launcher.spec
+
+      - name: Build Linux AppImage
+        if: matrix.family == 'linux'
+        shell: bash
+        env:
+          APPIMAGETOOL_URL: >-
+            https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+        run: |
+          app_id="io.github.xander_haj.Z3RLauncher"
+          appdir="appimage-work/AppDir"
+
+          rm -rf appimage-work
+          mkdir -p \
+            "${appdir}/usr/bin" \
+            "${appdir}/usr/share/applications" \
+            "${appdir}/usr/share/icons/hicolor/128x128/apps" \
+            dist
+
+          install -Dm755 dist/z3r-launcher "${appdir}/usr/bin/z3r-launcher"
+          install -Dm755 packaging/appimage/AppRun "${appdir}/AppRun"
+          install -Dm644 packaging/appimage/${app_id}.desktop "${appdir}/${app_id}.desktop"
+          install -Dm644 packaging/appimage/${app_id}.desktop \
+            "${appdir}/usr/share/applications/${app_id}.desktop"
+          install -Dm644 resources/icons/128x128.png "${appdir}/${app_id}.png"
+          install -Dm644 resources/icons/128x128.png \
+            "${appdir}/usr/share/icons/hicolor/128x128/apps/${app_id}.png"
+          ln -s "${app_id}.png" "${appdir}/.DirIcon"
+
+          wget -q "${APPIMAGETOOL_URL}" -O appimage-work/appimagetool-x86_64.AppImage
+          chmod +x appimage-work/appimagetool-x86_64.AppImage
+          (
+            cd appimage-work
+            ./appimagetool-x86_64.AppImage --appimage-extract
+            mv squashfs-root appimagetool-root
+          )
+
+          ARCH=x86_64 \
+            appimage-work/appimagetool-root/AppRun \
+            "${appdir}" \
+            dist/Z3R-Launcher-linux-x64.AppImage
+          chmod +x dist/Z3R-Launcher-linux-x64.AppImage
+          tar -czf dist/Z3R-Launcher-linux-x64.AppImage.tar.gz \
+            -C dist Z3R-Launcher-linux-x64.AppImage
+
+      - name: Build macOS DMG
+        if: matrix.family == 'macos'
+        shell: bash
+        env:
+          DMG_NAME: ${{ matrix.dmg_name }}
+        run: |
+          app_path="dist/Z3R Launcher.app"
+          dmg_work="${RUNNER_TEMP:-/tmp}/z3r-launcher-dmg-${{ matrix.artifact_name }}"
+          mount_dir="${dmg_work}/mount"
+          staging_dir="${dmg_work}/staging"
+          rw_dmg="${dmg_work}/${DMG_NAME%.dmg}.rw.dmg"
+          final_dmg="dist/${DMG_NAME}"
+
+          cleanup() {
+            hdiutil detach "${mount_dir}" -force >/dev/null 2>&1 || true
+            rm -rf "${dmg_work}"
+          }
+          trap cleanup EXIT
+
+          if [ ! -d "${app_path}" ]; then
+            echo "PyInstaller did not create ${app_path}."
+            find dist -maxdepth 3 -print
+            exit 1
+          fi
+
+          cleanup
+          rm -f "${final_dmg}"
+          mkdir -p "${mount_dir}" "${staging_dir}" dist
+          ditto "${app_path}" "${staging_dir}/Z3R Launcher.app"
+          ln -s /Applications "${staging_dir}/Applications"
+          size_mb=$(du -sm "${staging_dir}" | awk '{ print $1 + 128 }')
+
+          hdiutil create \
+            -volname "Z3R Launcher" \
+            -fs HFS+ \
+            -size "${size_mb}m" \
+            -type UDIF \
+            "${rw_dmg}"
+          hdiutil attach "${rw_dmg}" -mountpoint "${mount_dir}" -nobrowse -noautoopen
+          ditto "${staging_dir}/Z3R Launcher.app" "${mount_dir}/Z3R Launcher.app"
+          ln -s /Applications "${mount_dir}/Applications"
+          sync
+          hdiutil detach "${mount_dir}" || hdiutil detach "${mount_dir}" -force
+          hdiutil convert "${rw_dmg}" -format UDZO -ov -o "${final_dmg}"
+          hdiutil verify "${final_dmg}"
+
+      - name: Build Windows setup exe
+        if: matrix.family == 'windows'
+        shell: pwsh
+        run: |
+          $repoRoot = (Get-Location).Path
+          Copy-Item -Path dist\z3r-launcher.exe -Destination dist\Z3R-Launcher-windows-x64.exe -Force
+          $makensis = Get-Command makensis.exe -ErrorAction SilentlyContinue
+          if ($null -eq $makensis) {
+            $candidate = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+            if (!(Test-Path $candidate)) {
+              throw "makensis.exe was not found after installing NSIS."
+            }
+            & $candidate "/DREPO_ROOT=$repoRoot" packaging\windows\z3r-launcher.nsi
+          } else {
+            & $makensis.Source "/DREPO_ROOT=$repoRoot" packaging\windows\z3r-launcher.nsi
+          }
+
+      - name: Collect release assets
+        shell: bash
+        run: |
+          mkdir -p release-dist
+          case "${{ matrix.family }}" in
+            linux)
+              cp dist/Z3R-Launcher-linux-x64.AppImage release-dist/
+              cp dist/Z3R-Launcher-linux-x64.AppImage.tar.gz release-dist/
+              ;;
+            windows)
+              cp dist/Z3R-Launcher-windows-x64.exe release-dist/
+              cp dist/Z3R-Launcher-windows-x64-setup.exe release-dist/
+              ;;
+            macos)
+              cp "dist/${{ matrix.dmg_name }}" release-dist/
+              ;;
+          esac
+
+          printf 'Release assets to upload:\n'
+          find release-dist -maxdepth 1 -type f -print | sort
+
+      - name: Upload Python artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: Z3R-Launcher-${{ matrix.artifact_name }}
+          path: release-dist/*
+          if-no-files-found: error
+
+      - name: Upload Python release assets
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+        with:
+          token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          name: Z3R Launcher ${{ github.ref_name }}
+          body: Download the launcher for your operating system below.
+          draft: true
+          generate_release_notes: true
+          files: release-dist/*
+
+  build-flatpak:
+    name: Flatpak for Linux
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50
+      options: --privileged
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Stamp Flatpak release metadata
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          Path("resources/build-info.json").write_text(json.dumps({
+              "release_tag": os.environ["GITHUB_REF_NAME"],
+              "build_sha": os.environ["GITHUB_SHA"],
+          }, indent=2) + "\n")
+          PY
+
+      - name: Build and upload Flatpak bundle
+        uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: Z3R-Launcher-linux.flatpak
+          manifest-path: packaging/flatpak/io.github.xander_haj.Z3RLauncher.yml
+          branch: stable
+          cache-key: flatpak-builder-${{ github.sha }}
+          upload-artifact: true
+
+      - name: Upload Flatpak release asset
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+        with:
+          token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          name: Z3R Launcher ${{ github.ref_name }}
+          body: Download the launcher for your operating system below.
+          draft: true
+          generate_release_notes: true
+          files: Z3R-Launcher-linux.flatpak
