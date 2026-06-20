@@ -1,8 +1,8 @@
-import { appendOptionPicker } from "/features-picker.js";
+import { createSpriteGrid } from "./sprite-grid.js";
 
 const LINK_GRAPHICS_KEY = "LinkGraphics";
 
-export async function renderSpriteSelector(container, helpers, refresh) {
+export async function renderSpriteSelector(container, helpers, refresh, browser) {
   let iniSnapshot;
   let assets;
 
@@ -41,18 +41,18 @@ export async function renderSpriteSelector(container, helpers, refresh) {
   }
 
   if (assets.sprites.options.length > 0) {
-    appendOptionPicker(
-      section,
-      assets.sprites.options,
-      "Use sprite",
-      async (value) => {
+    appendSpritePicker(section, {
+      options: assets.sprites.options,
+      browser,
+      helpers,
+      selectedValue: line?.value ?? "",
+      onApply: async (value) => {
         const applied = await applySpriteSelection(value, line, helpers);
         if (applied) {
           await refresh();
         }
       },
-      line?.value ?? "",
-    );
+    });
 
     if (!line) {
       appendUnavailable(section, `${LINK_GRAPHICS_KEY} will be created in zelda3.ini when applied.`);
@@ -62,6 +62,88 @@ export async function renderSpriteSelector(container, helpers, refresh) {
   }
 
   container.append(section);
+}
+
+function appendSpritePicker(section, config) {
+  const row = document.createElement("div");
+  const lookup = buildOptionLookup(config.options);
+  let gridController = null;
+
+  row.className = "features-picker-row link-sprite-picker-row";
+  row.innerHTML = `
+    <div class="features-picker-control">
+      <input
+        class="features-filter-input"
+        type="text"
+        placeholder="Type to filter"
+        autocomplete="off"
+      />
+      <button
+        class="secondary-button features-picker-toggle"
+        type="button"
+        aria-expanded="false"
+      >Show all</button>
+    </div>
+    <button class="secondary-button" type="button">Use sprite</button>
+  `;
+
+  const input = row.querySelector(".features-filter-input");
+  const toggle = row.querySelector(".features-picker-toggle");
+  const applyButton = row.lastElementChild;
+  input.value = (
+    optionLabelForValue(config.options, config.selectedValue)
+    ?? optionDisplayLabel(config.options[0])
+  );
+
+  input.addEventListener("input", () => {
+    gridController?.filter(input.value);
+  });
+  toggle.addEventListener("click", () => {
+    if (config.browser.isOpen()) {
+      config.browser.hide();
+      return;
+    }
+
+    gridController = createSpriteGrid({
+      options: config.options,
+      selectedValue: resolveValue(),
+      helpers: config.helpers,
+      onChoose(option) {
+        input.value = optionDisplayLabel(option);
+        config.browser.hide();
+      },
+      onClose() {
+        config.browser.hide();
+      },
+    });
+    config.browser.show(gridController.element, () => {
+      gridController?.destroy();
+      gridController = null;
+      syncToggle();
+    });
+    gridController.filter("");
+    syncToggle();
+  });
+  applyButton.addEventListener("click", async () => {
+    applyButton.disabled = true;
+    try {
+      await config.onApply(resolveValue());
+    } finally {
+      applyButton.disabled = false;
+    }
+  });
+
+  section.append(row);
+
+  function resolveValue() {
+    return lookup.get(input.value) ?? input.value;
+  }
+
+  function syncToggle() {
+    const open = config.browser.isOpen();
+    toggle.textContent = open ? "Hide" : "Show all";
+    toggle.setAttribute("aria-expanded", open ? "true" : "false");
+  }
 }
 
 function appendSelectorUnavailable(container, message) {
@@ -147,6 +229,26 @@ function splitInstallOutput(output) {
 
 function findLine(lines, key) {
   return lines.find((line) => line.key.toLowerCase() === key.toLowerCase());
+}
+
+function optionLabelForValue(options, selectedValue) {
+  const selected = options.find((option) => option.value === selectedValue);
+  return selected ? optionDisplayLabel(selected) : selectedValue;
+}
+
+function optionDisplayLabel(option) {
+  return option ? `${option.label} (${option.source})` : "";
+}
+
+function buildOptionLookup(options) {
+  const lookup = new Map();
+
+  for (const option of options) {
+    lookup.set(optionDisplayLabel(option), option.value);
+    lookup.set(option.value, option.value);
+  }
+
+  return lookup;
 }
 
 function replaceIniValue(rawLine, key, value) {

@@ -88,6 +88,17 @@ export function renderPreviewCard(card, snapshot, editorState) {
   renderAnimationStep(card.canvas, editorState.previewPixels, paletteWords, step, card.bounds);
 }
 
+export function renderStaticSpriteFrame(canvas, pixels, paletteWords, animation) {
+  if (!pixels || !animation) {
+    clearPreviewCanvas(canvas, FALLBACK_BOUNDS);
+    return;
+  }
+
+  const bounds = measureAnimation(animation);
+  const step = animation.steps[0];
+  renderAnimationStep(canvas, pixels, paletteWords, step, bounds);
+}
+
 export function measureAnimation(animation) {
   const bounds = { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity };
 

@@ -2,6 +2,7 @@
 // assets/compile_resources.py, then asks the backend to rebuild zelda3_assets.dat
 // with assets/restool.py without extracting fresh ROM assets over the edit.
 
+import { createSpriteBrowserHost } from "./browser-host.js";
 import { createLinkSpritePreview } from "./preview.js";
 import { renderSpriteSelector } from "./sprite-selector.js";
 
@@ -53,8 +54,12 @@ async function refreshLinkSpriteEditor(refs, helpers) {
     const snapshot = await helpers.call("read_link_sprite_palette", {
       projectPath: helpers.state.selectedPath,
     });
-    await renderSpriteSelector(refs.content, helpers, () => refreshLinkSpriteEditor(refs, helpers));
-    renderEditor(refs, snapshot, helpers);
+    const browser = createSpriteBrowserHost();
+    await renderSpriteSelector(refs.content, helpers, () => refreshLinkSpriteEditor(refs, helpers), browser);
+    refs.content.append(browser.host);
+    const editor = renderEditor(refs, snapshot, helpers);
+    browser.attachEditor(editor);
+    refs.content.append(editor);
   } catch (error) {
     helpers.log(`Could not read Link sprite palette: ${error}`);
     refs.content.append(emptyMessage(UNAVAILABLE_MESSAGE));
@@ -116,10 +121,10 @@ function renderEditor(refs, snapshot, helpers) {
   const controls = collectEditorControls(editor);
   updateActiveState(statePill, editorState.active, editorState.source);
   wireEditorActions(controls, refs, helpers, editorState, status, statePill);
-  refs.content.append(editor);
   preview.load(helpers).catch((error) => {
     helpers.log(`Could not load Link sprite preview: ${error}`);
   });
+  return editor;
 }
 
 // Finds action buttons after the editor shell has been created.
