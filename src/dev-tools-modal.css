@@ -68,15 +68,59 @@
 }
 
 .dev-tool-runner-panel {
-  height: 100%;
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  height: 100vh;
+  padding: 0;
+  overflow: hidden;
+  background: #000;
 }
 
 .dev-tool-frame {
   display: block;
-  width: 100%;
-  height: calc(100% - 92px);
-  min-height: 560px;
-  border: 2px solid var(--gold-dim);
-  border-radius: var(--radius);
-  background: #000;
+  width: 100vw;
+  height: 100vh;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: #fff;
+}
+
+.dev-tool-exit-button {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 1001;
+  width: 42px;
+  min-height: 42px;
+  padding: 0;
+  border: 2px solid rgba(244, 196, 97, 0.72);
+  border-radius: 999px;
+  opacity: 0;
+  background: rgba(3, 8, 6, 0.78);
+}
+
+.dev-tool-exit-button::before,
+.dev-tool-exit-button::after {
+  content: "";
+  position: absolute;
+  left: 11px;
+  top: 18px;
+  width: 17px;
+  height: 3px;
+  background: var(--gold-bright);
+}
+
+.dev-tool-exit-button::before {
+  transform: rotate(45deg);
+}
+
+.dev-tool-exit-button::after {
+  transform: rotate(-45deg);
+}
+
+.dev-tool-exit-button:hover,
+.dev-tool-exit-button:focus-visible {
+  opacity: 0.88;
 }

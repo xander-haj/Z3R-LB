@@ -19,7 +19,7 @@ export function connectDevTools(helpers) {
       void closeRunner(refs, state, helpers).catch((error) => helpers.log(`Could not stop dev tool: ${error}`));
     }
   });
-  document.addEventListener("keydown", (event) => handleTriggerKey(event, refs, state, helpers));
+  document.addEventListener("keydown", (event) => handleDocumentKey(event, refs, state, helpers));
 
   return {
     open(projectPath, toolId) {
@@ -57,13 +57,7 @@ function ensureDevToolElements() {
   panel.dataset.view = "dev-tool-runner";
   panel.setAttribute("aria-label", "Dev tool runner");
   panel.innerHTML = `
-    <div class="section-heading">
-      <div>
-        <h2 id="devToolRunnerTitle">Dev Tool</h2>
-        <p id="devToolRunnerUrl" class="path-line"></p>
-      </div>
-      <button id="devToolRunnerCloseButton" class="secondary-button" type="button">Close Tool</button>
-    </div>
+    <button id="devToolRunnerCloseButton" class="dev-tool-exit-button" type="button" aria-label="Close editor"></button>
     <iframe id="devToolRunnerFrame" class="dev-tool-frame" title="Dev tool"></iframe>
   `;
 
@@ -78,11 +72,17 @@ function ensureDevToolElements() {
     installButton: dialog.querySelector("#devToolsInstallButton"),
     closeButton: dialog.querySelector("#devToolsCloseButton"),
     runnerPanel: panel,
-    runnerTitle: panel.querySelector("#devToolRunnerTitle"),
-    runnerUrl: panel.querySelector("#devToolRunnerUrl"),
     runnerFrame: panel.querySelector("#devToolRunnerFrame"),
     runnerCloseButton: panel.querySelector("#devToolRunnerCloseButton"),
   };
+}
+
+function handleDocumentKey(event, refs, state, helpers) {
+  if (event.key === "Escape" && helpers.state.activeView === "dev-tool-runner") {
+    void closeRunner(refs, state, helpers).catch((error) => helpers.log(`Could not stop dev tool: ${error}`));
+    return;
+  }
+  handleTriggerKey(event, refs, state, helpers);
 }
 
 function handleTriggerKey(event, refs, state, helpers) {
@@ -205,14 +205,8 @@ async function installSelectedTools(refs, helpers) {
 async function openDevTool(projectPath, toolId, refs, state, helpers) {
   const result = await helpers.call("launch_dev_tool", { projectPath, toolId });
   helpers.log(result.message);
-  if (result.external) {
-    helpers.log(`Opened ${result.label} in your browser: ${result.url}`);
-    return;
-  }
 
   state.sessionId = result.session_id;
-  refs.runnerTitle.textContent = result.label;
-  refs.runnerUrl.textContent = result.url;
   refs.runnerFrame.src = result.url;
   helpers.showView("dev-tool-runner");
 }

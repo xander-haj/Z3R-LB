@@ -4,17 +4,17 @@ import atexit
 import os
 import socket
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
 from .constants import DEV_TOOLS_DIR, DEV_TOOLS_SOURCE_URL, OVERWORLD_EDITOR_REPO
 from .errors import LauncherError
-from .platform_paths import display_path, hidden_subprocess_kwargs, is_appimage_runtime
+from .platform_paths import display_path, hidden_subprocess_kwargs
 from .processes import (
     action_result,
     command_env,
     git_program,
-    open_external_url as open_external_url_process,
     python_program,
     run_command,
 )
@@ -29,6 +29,8 @@ DEFAULT_TOOL = {
     "server_file": "server.py",
 }
 COPY_IGNORES = {".git", "__pycache__"}
+DEV_TOOL_PORT = 8086
+STARTUP_TIMEOUT_SECONDS = 4.0
 RUNNING_TOOLS: dict[str, dict[str, Any]] = {}
 
 
@@ -114,20 +116,12 @@ def launch_dev_tool(project_path: str, tool_id: str) -> dict[str, Any]:
     existing = running_session(session_id)
     url = existing["url"] if existing else start_dev_tool_server(project, tool, tool_dir, session_id)
 
-    external = is_appimage_runtime()
-    if external:
-        try:
-            open_external_url_process(url)
-        except LauncherError:
-            stop_running_session(session_id)
-            raise
-
     result = action_result(True, f"Launched {tool['label']}.", url)
     result.update({
         "tool_id": tool["id"],
         "label": tool["label"],
         "url": url,
-        "external": external,
+        "external": False,
         "session_id": session_id,
     })
     return result
@@ -202,20 +196,33 @@ def running_session(session_id: str) -> dict[str, Any] | None:
 
 
 def start_dev_tool_server(project: Path, tool: dict[str, str], tool_dir: Path, session_id: str) -> str:
-    port = free_local_port()
-    url = f"http://127.0.0.1:{port}/"
+    stop_other_sessions(session_id)
+    ensure_port_available(DEV_TOOL_PORT)
+    url = f"http://127.0.0.1:{DEV_TOOL_PORT}/"
+    log_path = dev_tool_log_path(project, tool)
+    log_file = log_path.open("ab")
     try:
         process = subprocess.Popen(
-            [python_executable(project), str(tool_dir / tool["server_file"]), "--host", "127.0.0.1", "--port", str(port)],
+            [
+                python_executable(project),
+                str(tool_dir / tool["server_file"]),
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(DEV_TOOL_PORT),
+            ],
             cwd=str(tool_dir),
             env=dev_tool_env(project),
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
             **hidden_subprocess_kwargs(),
         )
     except OSError as error:
         raise LauncherError(f"Could not start {tool['label']}: {error}") from error
+    finally:
+        log_file.close()
+    wait_for_server(process, tool, log_path)
     RUNNING_TOOLS[session_id] = {"process": process, "url": url, "label": tool["label"]}
     return url
 
@@ -244,10 +251,54 @@ def project_venv_python(project: Path) -> Path | None:
     return None
 
 
-def free_local_port() -> int:
+def dev_tool_log_path(project: Path, tool: dict[str, str]) -> Path:
+    log_dir = project / DEV_TOOLS_DIR / ".launcher-logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    path = log_dir / f"{tool['id']}.log"
+    path.write_text("", encoding="utf-8")
+    return path
+
+
+def ensure_port_available(port: int) -> None:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
-        server.bind(("127.0.0.1", 0))
-        return int(server.getsockname()[1])
+        try:
+            server.bind(("127.0.0.1", port))
+        except OSError as error:
+            raise LauncherError(f"Port {port} is already in use. Close the existing editor server first.") from error
+
+
+def wait_for_server(process: subprocess.Popen, tool: dict[str, str], log_path: Path) -> None:
+    deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            raise LauncherError(startup_error_message(tool, "server exited before it could open", log_path))
+        if port_accepts_connections(DEV_TOOL_PORT):
+            return
+        time.sleep(0.1)
+    process.terminate()
+    raise LauncherError(startup_error_message(tool, "did not start on", log_path))
+
+
+def port_accepts_connections(port: int) -> bool:
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+            return True
+    except OSError:
+        return False
+
+
+def startup_error_message(tool: dict[str, str], reason: str, log_path: Path) -> str:
+    message = f"{tool['label']} {reason} http://127.0.0.1:{DEV_TOOL_PORT}/."
+    detail = read_log_tail(log_path).strip()
+    return f"{message}\n{detail}" if detail else message
+
+
+def read_log_tail(path: Path) -> str:
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return ""
+    return data[-4000:].decode("utf-8", errors="replace")
 
 
 def stop_running_session(session_id: str) -> None:
@@ -255,6 +306,12 @@ def stop_running_session(session_id: str) -> None:
     process = session.get("process") if session else None
     if process and process.poll() is None:
         process.terminate()
+
+
+def stop_other_sessions(session_id: str) -> None:
+    for running_session_id in list(RUNNING_TOOLS):
+        if running_session_id != session_id:
+            stop_running_session(running_session_id)
 
 
 def stop_all_dev_tools() -> None:
