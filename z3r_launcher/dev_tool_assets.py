@@ -30,6 +30,7 @@ DEFAULT_TOOL = {
 }
 COPY_IGNORES = {".git", "__pycache__"}
 STARTUP_TIMEOUT_SECONDS = 4.0
+STOP_TIMEOUT_SECONDS = 3.0
 RUNNING_TOOLS: dict[str, dict[str, Any]] = {}
 
 
@@ -275,7 +276,7 @@ def wait_for_server(process: subprocess.Popen, tool: dict[str, str], log_path: P
         if port_accepts_connections(OVERWORLD_EDITOR_PORT):
             return
         time.sleep(0.1)
-    process.terminate()
+    stop_process(process)
     raise LauncherError(startup_error_message(tool, "did not start on", log_path))
 
 
@@ -304,8 +305,17 @@ def read_log_tail(path: Path) -> str:
 def stop_running_session(session_id: str) -> None:
     session = RUNNING_TOOLS.pop(session_id, None)
     process = session.get("process") if session else None
+    stop_process(process)
+
+
+def stop_process(process: subprocess.Popen | None) -> None:
     if process and process.poll() is None:
         process.terminate()
+        try:
+            process.wait(timeout=STOP_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=STOP_TIMEOUT_SECONDS)
 
 
 def stop_other_sessions(session_id: str) -> None:
