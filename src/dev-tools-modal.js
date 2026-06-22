@@ -2,16 +2,21 @@ import { escapeHtml } from "./shared-utils.js";
 
 const TRIGGER_KEYS = ["d", "e", "v"];
 const TRIGGER_TIMEOUT_MS = 3000;
+const HOME_REVEAL_TIMEOUT_MS = 2800;
 
 export function connectDevTools(helpers) {
   const refs = ensureDevToolElements();
-  const state = { progress: 0, timer: null, sessionId: null };
+  const state = { progress: 0, timer: null, sessionId: null, homeRevealTimer: null };
 
   refs.closeButton.addEventListener("click", () => refs.dialog.close());
   refs.downloadButton.addEventListener("click", async () => downloadDevTools(refs, helpers));
   refs.installButton.addEventListener("click", async () => installSelectedTools(refs, helpers));
   refs.repoSelect.addEventListener("change", async () => refreshCatalog(refs, helpers));
   refs.runnerCloseButton.addEventListener("click", () => {
+    void closeRunner(refs, state, helpers).catch((error) => helpers.log(`Could not stop dev tool: ${error}`));
+  });
+  refs.homeZone.addEventListener("pointerdown", (event) => revealHomeButton(event, refs, state));
+  refs.homeButton.addEventListener("click", () => {
     void closeRunner(refs, state, helpers).catch((error) => helpers.log(`Could not stop dev tool: ${error}`));
   });
   helpers.elements.backButton.addEventListener("click", () => {
@@ -57,6 +62,15 @@ function ensureDevToolElements() {
   panel.dataset.view = "dev-tool-runner";
   panel.setAttribute("aria-label", "Dev tool runner");
   panel.innerHTML = `
+    <div id="devToolHomeZone" class="dev-tool-home-zone">
+      <button id="devToolHomeButton" class="dev-tool-home-button" type="button" aria-label="Back to launcher home">
+        <svg aria-hidden="true" viewBox="0 0 24 24">
+          <path d="M3 11.5L12 4l9 7.5"></path>
+          <path d="M6.5 10.5V20h11v-9.5"></path>
+          <path d="M10 20v-5h4v5"></path>
+        </svg>
+      </button>
+    </div>
     <button id="devToolRunnerCloseButton" class="dev-tool-exit-button" type="button" aria-label="Close editor"></button>
     <iframe id="devToolRunnerFrame" class="dev-tool-frame" title="Dev tool"></iframe>
   `;
@@ -72,6 +86,8 @@ function ensureDevToolElements() {
     installButton: dialog.querySelector("#devToolsInstallButton"),
     closeButton: dialog.querySelector("#devToolsCloseButton"),
     runnerPanel: panel,
+    homeZone: panel.querySelector("#devToolHomeZone"),
+    homeButton: panel.querySelector("#devToolHomeButton"),
     runnerFrame: panel.querySelector("#devToolRunnerFrame"),
     runnerCloseButton: panel.querySelector("#devToolRunnerCloseButton"),
   };
@@ -207,12 +223,14 @@ async function openDevTool(projectPath, toolId, refs, state, helpers) {
   helpers.log(result.message);
 
   state.sessionId = result.session_id;
+  hideHomeButton(refs, state);
   refs.runnerFrame.src = result.embed_url ?? result.url;
   helpers.showView("dev-tool-runner");
 }
 
 async function closeRunner(refs, state, helpers) {
   refs.runnerFrame.removeAttribute("src");
+  hideHomeButton(refs, state);
   if (state.sessionId) {
     await helpers.call("stop_dev_tool", { sessionId: state.sessionId });
     state.sessionId = null;
@@ -222,6 +240,21 @@ async function closeRunner(refs, state, helpers) {
 
 function selectedRepoPath(refs) {
   return refs.repoSelect.value || "";
+}
+
+function revealHomeButton(event, refs, state) {
+  if (event.target !== refs.homeZone) {
+    return;
+  }
+  refs.homeZone.classList.add("revealed");
+  window.clearTimeout(state.homeRevealTimer);
+  state.homeRevealTimer = window.setTimeout(() => hideHomeButton(refs, state), HOME_REVEAL_TIMEOUT_MS);
+}
+
+function hideHomeButton(refs, state) {
+  refs.homeZone.classList.remove("revealed");
+  window.clearTimeout(state.homeRevealTimer);
+  state.homeRevealTimer = null;
 }
 
 function selectedToolIds(refs) {

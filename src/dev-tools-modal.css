@@ -87,6 +87,49 @@
   background: #fff;
 }
 
+.dev-tool-home-zone {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1001;
+  width: 86px;
+  height: 86px;
+}
+
+.dev-tool-home-button {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  min-height: 46px;
+  padding: 0;
+  border: 2px solid rgba(244, 196, 97, 0.78);
+  border-radius: 999px;
+  opacity: 0;
+  pointer-events: none;
+  background: rgba(3, 8, 6, 0.82);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+}
+
+.dev-tool-home-button svg {
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: var(--gold-bright);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.dev-tool-home-zone:hover .dev-tool-home-button,
+.dev-tool-home-zone:focus-within .dev-tool-home-button,
+.dev-tool-home-zone.revealed .dev-tool-home-button {
+  opacity: 0.94;
+  pointer-events: auto;
+}
+
 .dev-tool-exit-button {
   position: fixed;
   top: 12px;
