@@ -13,6 +13,7 @@ import { checksReady, updateEnvironmentActions } from "./environment-actions.js"
 import { connectRepoUpdateManager } from "./repo-update-manager.js";
 import { connectLauncherUpdateChecker } from "./launcher-update-checker.js";
 import { connectDevSettings } from "./dev-settings.js";
+import { connectDevTools } from "./dev-tools-modal.js";
 import { collectAppElements } from "./app-elements.js";
 import { createActivityDrawer } from "./activity-drawer.js";
 import { createRomUploader } from "./rom-upload.js";
@@ -71,7 +72,7 @@ async function openExternalUrl(url) {
 // because they operate on ROM storage, scan paths, or new project folders.
 function showView(view) {
   state.activeView = view;
-  for (const panel of elements.viewPanels) {
+  for (const panel of document.querySelectorAll(".view-panel")) {
     panel.classList.toggle("active", panel.dataset.view === view);
   }
   const onHome = view === "builds";
@@ -283,6 +284,8 @@ const featuresScreen = connectFeaturesScreen(helpers);
 const linkSpriteEditor = connectLinkSpriteEditor(helpers);
 const repoUpdateManager = connectRepoUpdateManager(helpers);
 helpers.openRepoUpdate = repoUpdateManager.open;
+const devTools = connectDevTools(helpers);
+helpers.openDevTool = devTools.open;
 connectScanPathManager(helpers);
 connectLauncherUpdateChecker(helpers);
 connectDevSettings(helpers);

@@ -24,6 +24,13 @@ from .app_commands import (
     store_rom_upload,
     sync_stored_rom_to_projects,
 )
+from .dev_tool_assets import (
+    clone_dev_tools,
+    install_dev_tool,
+    launch_dev_tool,
+    read_dev_tools,
+    stop_dev_tool,
+)
 from .environment_checks import check_environment
 from .errors import LauncherError
 from .feature_assets import (
@@ -109,6 +116,11 @@ class LauncherBackend:
             "choose_and_store_rom": choose_and_store_rom,
             "open_stored_rom_folder": open_stored_rom_folder,
             "sync_stored_rom_to_projects": sync_stored_rom_to_projects,
+            "read_dev_tools": read_dev_tools,
+            "clone_dev_tools": clone_dev_tools,
+            "install_dev_tool": install_dev_tool,
+            "launch_dev_tool": launch_dev_tool,
+            "stop_dev_tool": stop_dev_tool,
             "read_randomizer_setup": read_randomizer_setup,
             "extract_randomizer_assets": extract_randomizer_assets,
             "run_randomizer": run_randomizer,
