@@ -22,6 +22,7 @@ SPRITES_DIR = "sprites-gfx"
 SHADERS_DIR = "glsl-shaders"
 DEV_TOOLS_DIR = "dev_tools"
 OVERWORLD_EDITOR_REPO = "Z3R-OEB"
+OVERWORLD_EDITOR_PORT = 8086
 STORED_ROM_NAME = "zelda3.sfc"
 DEV_SETTINGS_FILE = "dev-settings.json"
 REPO_SETTINGS_FILE = "repo-settings.json"

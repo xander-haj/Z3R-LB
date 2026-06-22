@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .constants import DEV_TOOLS_DIR, DEV_TOOLS_SOURCE_URL, OVERWORLD_EDITOR_REPO
+from .constants import DEV_TOOLS_DIR, DEV_TOOLS_SOURCE_URL, OVERWORLD_EDITOR_PORT, OVERWORLD_EDITOR_REPO
 from .errors import LauncherError
 from .platform_paths import display_path, hidden_subprocess_kwargs
 from .processes import (
@@ -29,7 +29,6 @@ DEFAULT_TOOL = {
     "server_file": "server.py",
 }
 COPY_IGNORES = {".git", "__pycache__"}
-DEV_TOOL_PORT = 8086
 STARTUP_TIMEOUT_SECONDS = 4.0
 RUNNING_TOOLS: dict[str, dict[str, Any]] = {}
 
@@ -121,6 +120,7 @@ def launch_dev_tool(project_path: str, tool_id: str) -> dict[str, Any]:
         "tool_id": tool["id"],
         "label": tool["label"],
         "url": url,
+        "embed_url": "/dev-tool/",
         "external": False,
         "session_id": session_id,
     })
@@ -197,8 +197,8 @@ def running_session(session_id: str) -> dict[str, Any] | None:
 
 def start_dev_tool_server(project: Path, tool: dict[str, str], tool_dir: Path, session_id: str) -> str:
     stop_other_sessions(session_id)
-    ensure_port_available(DEV_TOOL_PORT)
-    url = f"http://127.0.0.1:{DEV_TOOL_PORT}/"
+    ensure_port_available(OVERWORLD_EDITOR_PORT)
+    url = f"http://127.0.0.1:{OVERWORLD_EDITOR_PORT}/"
     log_path = dev_tool_log_path(project, tool)
     log_file = log_path.open("ab")
     try:
@@ -209,7 +209,7 @@ def start_dev_tool_server(project: Path, tool: dict[str, str], tool_dir: Path, s
                 "--host",
                 "127.0.0.1",
                 "--port",
-                str(DEV_TOOL_PORT),
+                str(OVERWORLD_EDITOR_PORT),
             ],
             cwd=str(tool_dir),
             env=dev_tool_env(project),
@@ -272,7 +272,7 @@ def wait_for_server(process: subprocess.Popen, tool: dict[str, str], log_path: P
     while time.monotonic() < deadline:
         if process.poll() is not None:
             raise LauncherError(startup_error_message(tool, "server exited before it could open", log_path))
-        if port_accepts_connections(DEV_TOOL_PORT):
+        if port_accepts_connections(OVERWORLD_EDITOR_PORT):
             return
         time.sleep(0.1)
     process.terminate()
@@ -288,7 +288,7 @@ def port_accepts_connections(port: int) -> bool:
 
 
 def startup_error_message(tool: dict[str, str], reason: str, log_path: Path) -> str:
-    message = f"{tool['label']} {reason} http://127.0.0.1:{DEV_TOOL_PORT}/."
+    message = f"{tool['label']} {reason} http://127.0.0.1:{OVERWORLD_EDITOR_PORT}/."
     detail = read_log_tail(log_path).strip()
     return f"{message}\n{detail}" if detail else message
 

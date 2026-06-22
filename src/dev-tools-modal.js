@@ -207,7 +207,7 @@ async function openDevTool(projectPath, toolId, refs, state, helpers) {
   helpers.log(result.message);
 
   state.sessionId = result.session_id;
-  refs.runnerFrame.src = result.url;
+  refs.runnerFrame.src = result.embed_url ?? result.url;
   helpers.showView("dev-tool-runner");
 }
 
