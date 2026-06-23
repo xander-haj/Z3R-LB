@@ -9,8 +9,16 @@ from pathlib import Path
 from typing import Any
 
 from .constants import DEV_TOOLS_DIR, DEV_TOOLS_SOURCE_URL, OVERWORLD_EDITOR_PORT, OVERWORLD_EDITOR_REPO
+from .dev_tool_processes import (
+    dev_tool_subprocess_kwargs,
+    read_pid_file,
+    remove_pid_file,
+    stop_pid,
+    stop_process,
+    write_pid_file,
+)
 from .errors import LauncherError
-from .platform_paths import display_path, hidden_subprocess_kwargs
+from .platform_paths import display_path
 from .processes import (
     action_result,
     command_env,
@@ -128,8 +136,11 @@ def launch_dev_tool(project_path: str, tool_id: str) -> dict[str, Any]:
     return result
 
 
-def stop_dev_tool(session_id: str) -> dict[str, Any]:
-    stop_running_session(session_id)
+def stop_dev_tool(session_id: str | None = None) -> dict[str, Any]:
+    if session_id:
+        stop_running_session(session_id)
+    else:
+        stop_all_dev_tools()
     return action_result(True, "Dev tool stopped.")
 
 
@@ -190,17 +201,23 @@ def tool_session_id(project: Path, tool: dict[str, str]) -> str:
 def running_session(session_id: str) -> dict[str, Any] | None:
     session = RUNNING_TOOLS.get(session_id)
     process = session.get("process") if session else None
-    if process and process.poll() is None:
+    if process and process.poll() is None and port_accepts_connections(OVERWORLD_EDITOR_PORT):
         return session
+    if process and process.poll() is None:
+        stop_running_session(session_id)
+        return None
+    remove_pid_file(session.get("pid_path") if session else None)
     RUNNING_TOOLS.pop(session_id, None)
     return None
 
 
 def start_dev_tool_server(project: Path, tool: dict[str, str], tool_dir: Path, session_id: str) -> str:
     stop_other_sessions(session_id)
+    stop_stale_session(session_id)
     ensure_port_available(OVERWORLD_EDITOR_PORT)
     url = f"http://127.0.0.1:{OVERWORLD_EDITOR_PORT}/"
     log_path = dev_tool_log_path(project, tool)
+    pid_path = dev_tool_pid_path(project, tool)
     log_file = log_path.open("ab")
     try:
         process = subprocess.Popen(
@@ -217,14 +234,24 @@ def start_dev_tool_server(project: Path, tool: dict[str, str], tool_dir: Path, s
             stdin=subprocess.DEVNULL,
             stdout=log_file,
             stderr=subprocess.STDOUT,
-            **hidden_subprocess_kwargs(),
+            **dev_tool_subprocess_kwargs(),
         )
     except OSError as error:
         raise LauncherError(f"Could not start {tool['label']}: {error}") from error
     finally:
         log_file.close()
-    wait_for_server(process, tool, log_path)
-    RUNNING_TOOLS[session_id] = {"process": process, "url": url, "label": tool["label"]}
+    try:
+        write_pid_file(pid_path, process.pid)
+        wait_for_server(process, tool, log_path)
+    except OSError as error:
+        stop_process(process, STOP_TIMEOUT_SECONDS)
+        remove_pid_file(pid_path)
+        raise LauncherError(f"Could not track {tool['label']} process: {error}") from error
+    except LauncherError:
+        stop_process(process, STOP_TIMEOUT_SECONDS)
+        remove_pid_file(pid_path)
+        raise
+    RUNNING_TOOLS[session_id] = {"process": process, "url": url, "label": tool["label"], "pid_path": pid_path}
     return url
 
 
@@ -260,6 +287,10 @@ def dev_tool_log_path(project: Path, tool: dict[str, str]) -> Path:
     return path
 
 
+def dev_tool_pid_path(project: Path, tool: dict[str, str]) -> Path:
+    return project / DEV_TOOLS_DIR / ".launcher-logs" / f"{tool['id']}.pid"
+
+
 def ensure_port_available(port: int) -> None:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
         try:
@@ -276,7 +307,7 @@ def wait_for_server(process: subprocess.Popen, tool: dict[str, str], log_path: P
         if port_accepts_connections(OVERWORLD_EDITOR_PORT):
             return
         time.sleep(0.1)
-    stop_process(process)
+    stop_process(process, STOP_TIMEOUT_SECONDS)
     raise LauncherError(startup_error_message(tool, "did not start on", log_path))
 
 
@@ -305,17 +336,16 @@ def read_log_tail(path: Path) -> str:
 def stop_running_session(session_id: str) -> None:
     session = RUNNING_TOOLS.pop(session_id, None)
     process = session.get("process") if session else None
-    stop_process(process)
+    pid_path = session.get("pid_path") if session else pid_path_from_session_id(session_id)
+    stop_process(process, STOP_TIMEOUT_SECONDS)
+    stop_pid(read_pid_file(pid_path), STOP_TIMEOUT_SECONDS, lambda: not port_accepts_connections(OVERWORLD_EDITOR_PORT))
+    remove_pid_file(pid_path)
 
 
-def stop_process(process: subprocess.Popen | None) -> None:
-    if process and process.poll() is None:
-        process.terminate()
-        try:
-            process.wait(timeout=STOP_TIMEOUT_SECONDS)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=STOP_TIMEOUT_SECONDS)
+def stop_stale_session(session_id: str) -> None:
+    pid_path = pid_path_from_session_id(session_id)
+    stop_pid(read_pid_file(pid_path), STOP_TIMEOUT_SECONDS, lambda: not port_accepts_connections(OVERWORLD_EDITOR_PORT))
+    remove_pid_file(pid_path)
 
 
 def stop_other_sessions(session_id: str) -> None:
@@ -327,6 +357,15 @@ def stop_other_sessions(session_id: str) -> None:
 def stop_all_dev_tools() -> None:
     for session_id in list(RUNNING_TOOLS):
         stop_running_session(session_id)
+
+
+def pid_path_from_session_id(session_id: str) -> Path | None:
+    try:
+        project_text, tool_id = session_id.rsplit(":", 1)
+        tool = require_tool(tool_id)
+    except (ValueError, LauncherError):
+        return None
+    return dev_tool_pid_path(Path(project_text), tool)
 
 
 atexit.register(stop_all_dev_tools)

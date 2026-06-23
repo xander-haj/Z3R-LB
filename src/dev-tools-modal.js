@@ -6,7 +6,7 @@ const HOME_REVEAL_TIMEOUT_MS = 2800;
 
 export function connectDevTools(helpers) {
   const refs = ensureDevToolElements();
-  const state = { progress: 0, timer: null, sessionId: null, homeRevealTimer: null };
+  const state = { progress: 0, timer: null, sessionId: null, homeRevealTimer: null, stopPromise: null };
 
   refs.closeButton.addEventListener("click", () => refs.dialog.close());
   refs.downloadButton.addEventListener("click", async () => downloadDevTools(refs, helpers));
@@ -219,6 +219,10 @@ async function installSelectedTools(refs, helpers) {
 }
 
 async function openDevTool(projectPath, toolId, refs, state, helpers) {
+  if (state.stopPromise) {
+    await state.stopPromise.catch(() => {});
+  }
+
   const result = await helpers.call("launch_dev_tool", { projectPath, toolId });
   helpers.log(result.message);
 
@@ -229,13 +233,20 @@ async function openDevTool(projectPath, toolId, refs, state, helpers) {
 }
 
 async function closeRunner(refs, state, helpers) {
+  const sessionId = state.sessionId;
+  state.sessionId = null;
   refs.runnerFrame.removeAttribute("src");
   hideHomeButton(refs, state);
-  if (state.sessionId) {
-    await helpers.call("stop_dev_tool", { sessionId: state.sessionId });
-    state.sessionId = null;
-  }
   helpers.showView("builds");
+  const stopPromise = helpers.call("stop_dev_tool", sessionId ? { sessionId } : {});
+  state.stopPromise = stopPromise;
+  try {
+    await stopPromise;
+  } finally {
+    if (state.stopPromise === stopPromise) {
+      state.stopPromise = null;
+    }
+  }
 }
 
 function selectedRepoPath(refs) {
