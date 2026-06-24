@@ -65,8 +65,9 @@ export function collectAppElements() {
     venvButton: document.querySelector("#venvButton"),
     dependenciesButton: document.querySelector("#dependenciesButton"),
     extractButton: document.querySelector("#extractButton"),
-    extractVisualStudioButton: document.querySelector("#extractVisualStudioButton"),
-    extractTccButton: document.querySelector("#extractTccButton"),
+    rebuildProjectButton: document.querySelector("#rebuildProjectButton"),
+    rebuildVisualStudioButton: document.querySelector("#rebuildVisualStudioButton"),
+    rebuildTccButton: document.querySelector("#rebuildTccButton"),
     environmentPlayButton: document.querySelector("#environmentPlayButton"),
     clearLogButton: document.querySelector("#clearLogButton"),
   };

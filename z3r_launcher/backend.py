@@ -64,6 +64,9 @@ from .setup_commands import (
     install_dependencies,
     launch_game,
     open_project_folder,
+    rebuild_project,
+    rebuild_project_tcc,
+    rebuild_project_visual_studio,
 )
 from .update_downloads import current_update_version
 from .update_installers import install_launcher_update
@@ -98,6 +101,9 @@ class LauncherBackend:
             "extract_assets": extract_assets,
             "extract_assets_visual_studio": extract_assets_visual_studio,
             "extract_assets_tcc": extract_assets_tcc,
+            "rebuild_project": rebuild_project,
+            "rebuild_project_visual_studio": rebuild_project_visual_studio,
+            "rebuild_project_tcc": rebuild_project_tcc,
             "open_external_url": open_external_url,
             "read_feature_assets": read_feature_assets,
             "clone_feature_asset": clone_feature_asset,
