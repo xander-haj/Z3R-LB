@@ -11,7 +11,7 @@ from .environment_checks import missing_c_compiler_message, python_ssl_check
 from .errors import LauncherError
 from .github_urls import github_repo_owner_and_name, normalize_github_url
 from .linux_game_downloads import install_prebuilt_linux_game_executable
-from .platform_paths import display_path, hidden_subprocess_kwargs, is_linux, is_windows, uses_downloaded_linux_game_executable
+from .platform_paths import display_path, hidden_subprocess_kwargs, is_linux, is_macos, is_windows, uses_downloaded_linux_game_executable
 from .processes import (
     action_result,
     bundled_sdl2_dll,
@@ -176,8 +176,9 @@ def build_project_tcc(project_path: str) -> dict[str, Any]:
 
 
 def run_shell_command(command: str, cwd: Path, success_message: str) -> dict[str, Any]:
+    program, args = shell_command_parts(command)
     try:
-        output = run_process("/bin/sh", ["-lc", command], cwd=cwd, capture=True)
+        output = run_process(program, args, cwd=cwd, capture=True)
     except OSError as error:
         raise LauncherError(f"Could not run {command}: {error}") from error
 
@@ -186,6 +187,13 @@ def run_shell_command(command: str, cwd: Path, success_message: str) -> dict[str
     ok = output.returncode == 0
     message = success_message if ok else f"{command} exited with status {output.returncode}"
     return action_result(ok, message, stdout, stderr)
+
+
+def shell_command_parts(command: str) -> tuple[str, list[str]]:
+    if not is_macos():
+        return "/bin/sh", ["-lc", command]
+    shell = os.environ.get("SHELL") or "/bin/zsh"
+    return shell, ["-lic", command]
 
 
 def build_executable(project: Path, route: str) -> dict[str, Any]:
