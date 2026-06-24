@@ -51,7 +51,7 @@ from .randomizer_commands import (
     run_randomizer,
 )
 from .repo_scanner import scan_siblings
-from .repo_update import apply_repo_update, preview_repo_update
+from .repo_update import apply_repo_update, preview_repo_update, rename_zelda_ini_to_user_ini
 from .setup_commands import (
     apply_snesrev_makefile_patch,
     apply_snesrev_solution_patch,
@@ -138,6 +138,7 @@ class LauncherBackend:
             "compile_randomized_assets": compile_randomized_assets,
             "preview_repo_update": preview_repo_update,
             "apply_repo_update": apply_repo_update,
+            "rename_zelda_ini_to_user_ini": rename_zelda_ini_to_user_ini,
             "read_zelda_ini": read_zelda_ini,
             "update_zelda_ini_line": update_zelda_ini_line,
             "set_zelda_ini_value": set_zelda_ini_value,

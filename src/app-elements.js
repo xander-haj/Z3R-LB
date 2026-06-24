@@ -45,6 +45,7 @@ export function collectAppElements() {
     repoUpdateSummary: document.querySelector("#repoUpdateSummary"),
     repoUpdateFileList: document.querySelector("#repoUpdateFileList"),
     repoUpdateOpenFolderButton: document.querySelector("#repoUpdateOpenFolderButton"),
+    repoUpdateRenameIniButton: document.querySelector("#repoUpdateRenameIniButton"),
     repoUpdateRefreshButton: document.querySelector("#repoUpdateRefreshButton"),
     repoUpdateApplyButton: document.querySelector("#repoUpdateApplyButton"),
     repoUpdateCloseButton: document.querySelector("#repoUpdateCloseButton"),
