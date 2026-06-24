@@ -144,6 +144,15 @@ def stop_dev_tool(session_id: str | None = None) -> dict[str, Any]:
     return action_result(True, "Dev tool stopped.")
 
 
+def active_dev_tool_project() -> Path | None:
+    for session in RUNNING_TOOLS.values():
+        process = session.get("process")
+        project = session.get("project")
+        if process and process.poll() is None and isinstance(project, Path):
+            return project
+    return None
+
+
 def shared_dev_tools_root() -> Path:
     return rom_storage_dir() / DEV_TOOLS_DIR
 
@@ -251,7 +260,13 @@ def start_dev_tool_server(project: Path, tool: dict[str, str], tool_dir: Path, s
         stop_process(process, STOP_TIMEOUT_SECONDS)
         remove_pid_file(pid_path)
         raise
-    RUNNING_TOOLS[session_id] = {"process": process, "url": url, "label": tool["label"], "pid_path": pid_path}
+    RUNNING_TOOLS[session_id] = {
+        "process": process,
+        "url": url,
+        "label": tool["label"],
+        "pid_path": pid_path,
+        "project": project,
+    }
     return url
 
 

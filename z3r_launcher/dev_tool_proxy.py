@@ -6,6 +6,9 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
 
 from .constants import OVERWORLD_EDITOR_PORT
+from .dev_tool_assets import active_dev_tool_project
+from .dev_tool_mods import prepare_mod_command
+from .errors import LauncherError
 
 
 HOP_BY_HOP_HEADERS = {
@@ -51,6 +54,8 @@ def proxy_dev_tool_request(
         return
 
     target = urllib.parse.urlunparse(("", "", target_path, "", parsed.query, ""))
+    if not prepare_proxied_command(handler, target_path):
+        return
     headers = proxied_request_headers(handler)
     connection: http.client.HTTPConnection | None = None
     try:
@@ -72,6 +77,24 @@ def proxy_dev_tool_request(
     handler.send_header("Content-Length", str(len(response_body)))
     handler.end_headers()
     handler.wfile.write(response_body)
+
+
+def prepare_proxied_command(handler: BaseHTTPRequestHandler, target_path: str) -> bool:
+    project = active_dev_tool_project()
+    if project is None:
+        return True
+    try:
+        prepare_mod_command(project, target_path)
+    except LauncherError as error:
+        write_text(handler, HTTPStatus.BAD_REQUEST, str(error))
+        return False
+    except ValueError as error:
+        write_text(handler, HTTPStatus.BAD_REQUEST, f"Could not prepare mod command: {error}")
+        return False
+    except OSError as error:
+        write_text(handler, HTTPStatus.BAD_REQUEST, f"Could not prepare mod command: {error}")
+        return False
+    return True
 
 
 def read_request_body(handler: BaseHTTPRequestHandler, max_request_bytes: int) -> bytes | None:
