@@ -144,14 +144,13 @@ def extract_assets_with_route(project_path: str, route: str) -> dict[str, Any]:
     extract = run_command(display_path(python), ["assets/restool.py", "--extract-from-rom"], project, "Asset extraction complete.")
     if not extract["ok"]:
         return extract
-    if uses_downloaded_linux_game_executable():
-        download = install_prebuilt_linux_game_executable(project)
-        return combine_results("Asset extraction and executable download complete.", extract, download)
     return extract
 
 
 def build_project(project_path: str) -> dict[str, Any]:
     project = Path(project_path)
+    if uses_downloaded_linux_game_executable():
+        return install_prebuilt_linux_game_executable(project)
     if is_windows():
         return run_visual_studio_build(project)
     return run_project_shell_command("make -j$(nproc)", project, "Project build complete.")
