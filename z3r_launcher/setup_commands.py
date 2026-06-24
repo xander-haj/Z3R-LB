@@ -11,6 +11,7 @@ from .environment_checks import missing_c_compiler_message, python_ssl_check
 from .errors import LauncherError
 from .github_urls import github_repo_owner_and_name, normalize_github_url
 from .linux_game_downloads import install_prebuilt_linux_game_executable
+from .linux_game_runtime import launch_env_for_game
 from .platform_paths import display_path, hidden_subprocess_kwargs, is_linux, is_windows, uses_downloaded_linux_game_executable
 from .processes import (
     action_result,
@@ -50,7 +51,7 @@ def launch_game(executable_path: str) -> dict[str, Any]:
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            env=command_env(),
+            env=launch_env_for_game(executable, working_dir, command_env()),
             **hidden_subprocess_kwargs(),
         )
     except OSError as error:

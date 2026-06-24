@@ -9,6 +9,7 @@ from typing import Any
 
 from .constants import LINUX_GAME_ARCHIVE_SUFFIXES, LINUX_GAME_EXECUTABLE_NAMES, PROJECT_RELEASES
 from .errors import LauncherError
+from .linux_game_runtime import install_appimage_game_asset
 from .platform_paths import display_path, update_work_dir
 from .processes import action_result, decode_output, git_program, run_process
 from .project_files import make_executable
@@ -191,7 +192,7 @@ def install_linux_game_executable_asset(asset_path: Path, project: Path) -> Path
         elif asset_path.suffix.lower() == ".zip":
             extract_linux_game_executable_from_zip(asset_path, temporary)
         elif asset_path.name.lower().endswith(".appimage"):
-            shutil.copy2(asset_path, temporary)
+            return install_appimage_game_asset(asset_path, project)
         elif asset_path.name.lower() in LINUX_GAME_EXECUTABLE_NAMES:
             shutil.copy2(asset_path, temporary)
         else:
