@@ -140,11 +140,36 @@ def extract_assets_with_route(project_path: str, route: str) -> dict[str, Any]:
     project = Path(project_path)
     python = venv_python(project / ".venv") or venv_python(project / "venv")
     if not python:
-        raise LauncherError("Create a venv before extracting assets.")
-    extract = run_command(display_path(python), ["assets/restool.py", "--extract-from-rom"], project, "Asset extraction complete.")
-    if not extract["ok"]:
-        return extract
-    return extract
+        raise LauncherError("Create a venv before building assets.")
+    result = run_command(
+        display_path(python),
+        ["assets/restool.py", "--extract-from-rom"],
+        project,
+        "Asset extraction and zelda3_assets.dat build complete.",
+    )
+    if not result["ok"] or built_asset_path(project):
+        return result
+    return action_result(
+        False,
+        "restool.py finished, but zelda3_assets.dat was not found in the selected repo.",
+        result["stdout"],
+        result["stderr"],
+    )
+
+
+def built_asset_path(project: Path) -> Path | None:
+    candidates = [
+        project / "zelda3_assets.dat",
+        project / "tables" / "zelda3_assets.dat",
+        project / "bin" / "x64-Release" / "zelda3_assets.dat",
+        project / "bin" / "x64-ReleaseDeploy" / "zelda3_assets.dat",
+        project / "bin" / "Win32-Release" / "zelda3_assets.dat",
+        project / "bin" / "Win32-ReleaseDeploy" / "zelda3_assets.dat",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def build_project(project_path: str) -> dict[str, Any]:

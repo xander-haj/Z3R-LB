@@ -12,7 +12,7 @@ export function updateEnvironmentActions(elements, checks, options = {}) {
   const pythonReady = checkReady(checks, "python");
   const venvReady = checkReady(checks, "venv");
   const dependenciesReady = checkReady(checks, "python-dependencies");
-  // Build assets invokes restool.py --extract-from-rom, which fails without zelda3.sfc in the project root.
+  // Build assets invokes restool.py --extract-from-rom, which extracts and compiles zelda3_assets.dat.
   const romReady = checkReady(checks, "rom");
   const windowsReady = checks.some((check) => check.id === "msbuild" || check.id === "tcc");
   const unixBuildIds = ["make", "c-compiler", "sdl2-dev"];
