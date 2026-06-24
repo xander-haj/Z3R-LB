@@ -149,21 +149,43 @@ def extract_assets_with_route(project_path: str, route: str) -> dict[str, Any]:
     return extract
 
 
+def build_project(project_path: str) -> dict[str, Any]:
+    project = Path(project_path)
+    if is_windows():
+        return run_visual_studio_build(project)
+    return run_shell_command("make -j$(nproc)", project, "Project build complete.")
+
+
 def rebuild_project(project_path: str) -> dict[str, Any]:
     project = Path(project_path)
-    clean = run_command("make", ["clean"], project, "Project clean complete.")
-    if not clean["ok"]:
-        return clean
-    build = build_executable(project, "automatic")
-    return combine_results("Project rebuild complete.", clean, build)
+    if is_windows():
+        return run_visual_studio_build(project, rebuild=True)
+    return run_shell_command("make clean && make -j$(nproc)", project, "Project rebuild complete.")
+
+
+def build_project_visual_studio(project_path: str) -> dict[str, Any]:
+    return run_visual_studio_build(Path(project_path))
 
 
 def rebuild_project_visual_studio(project_path: str) -> dict[str, Any]:
     return run_visual_studio_build(Path(project_path), rebuild=True)
 
 
-def rebuild_project_tcc(project_path: str) -> dict[str, Any]:
+def build_project_tcc(project_path: str) -> dict[str, Any]:
     return run_tcc_build(Path(project_path))
+
+
+def run_shell_command(command: str, cwd: Path, success_message: str) -> dict[str, Any]:
+    try:
+        output = run_process("/bin/sh", ["-lc", command], cwd=cwd, capture=True)
+    except OSError as error:
+        raise LauncherError(f"Could not run {command}: {error}") from error
+
+    stdout = decode_output(output.stdout)
+    stderr = decode_output(output.stderr)
+    ok = output.returncode == 0
+    message = success_message if ok else f"{command} exited with status {output.returncode}"
+    return action_result(ok, message, stdout, stderr)
 
 
 def build_executable(project: Path, route: str) -> dict[str, Any]:

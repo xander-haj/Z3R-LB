@@ -55,6 +55,9 @@ from .repo_update import apply_repo_update, preview_repo_update
 from .setup_commands import (
     apply_snesrev_makefile_patch,
     apply_snesrev_solution_patch,
+    build_project,
+    build_project_tcc,
+    build_project_visual_studio,
     clone_custom_project,
     clone_project,
     create_venv,
@@ -65,7 +68,6 @@ from .setup_commands import (
     launch_game,
     open_project_folder,
     rebuild_project,
-    rebuild_project_tcc,
     rebuild_project_visual_studio,
 )
 from .update_downloads import current_update_version
@@ -101,9 +103,11 @@ class LauncherBackend:
             "extract_assets": extract_assets,
             "extract_assets_visual_studio": extract_assets_visual_studio,
             "extract_assets_tcc": extract_assets_tcc,
+            "build_project": build_project,
+            "build_project_visual_studio": build_project_visual_studio,
+            "build_project_tcc": build_project_tcc,
             "rebuild_project": rebuild_project,
             "rebuild_project_visual_studio": rebuild_project_visual_studio,
-            "rebuild_project_tcc": rebuild_project_tcc,
             "open_external_url": open_external_url,
             "read_feature_assets": read_feature_assets,
             "clone_feature_asset": clone_feature_asset,

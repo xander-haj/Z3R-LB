@@ -27,7 +27,7 @@ export function updateEnvironmentActions(elements, checks, options = {}) {
   const venvFailureBlocksDownstream = failedSetupStep === "create_venv";
   const dependencyFailureBlocksAssets = failedSetupStep === "install_dependencies";
   const setupBlocked = actionRunning || !hasSelectedProject;
-  const showUnixRebuild =
+  const showUnixProjectBuild =
     !windowsReady && !downloadedLinuxGameExecutable && (environmentOs === "macos" || environmentOs === "linux");
 
   elements.venvButton.disabled = setupBlocked || !pythonReady;
@@ -36,12 +36,16 @@ export function updateEnvironmentActions(elements, checks, options = {}) {
   elements.extractButton.classList.remove("hidden");
   elements.extractButton.disabled =
     setupBlocked || venvFailureBlocksDownstream || dependencyFailureBlocksAssets || !assetBuildReady;
-  elements.rebuildProjectButton.classList.toggle("hidden", !showUnixRebuild);
+  elements.buildProjectButton.classList.toggle("hidden", !showUnixProjectBuild);
+  elements.buildProjectButton.disabled = setupBlocked || !unixBuildReady;
+  elements.rebuildProjectButton.classList.toggle("hidden", !showUnixProjectBuild);
   elements.rebuildProjectButton.disabled = setupBlocked || !unixBuildReady;
+  elements.buildVisualStudioButton.classList.toggle("hidden", !windowsReady || !msbuildReady);
+  elements.buildVisualStudioButton.disabled = setupBlocked || !msbuildReady;
   elements.rebuildVisualStudioButton.classList.toggle("hidden", !windowsReady || !msbuildReady);
   elements.rebuildVisualStudioButton.disabled = setupBlocked || !msbuildReady;
-  elements.rebuildTccButton.classList.toggle("hidden", !windowsReady);
-  elements.rebuildTccButton.disabled = setupBlocked || !tccReady;
+  elements.buildTccButton.classList.toggle("hidden", !windowsReady);
+  elements.buildTccButton.disabled = setupBlocked || !tccReady;
 }
 
 // Looks up one environment check by stable id and treats only the explicit ok state as ready.

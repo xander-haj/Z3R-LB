@@ -14,14 +14,20 @@ export function connectEnvironmentSetupActions(helpers, environmentScreen) {
   elements.extractButton.addEventListener("click", async () => {
     await runSelectedSetupAction(helpers, environmentScreen, "extract_assets", assetRequiredCheckIds(helpers.state));
   });
+  elements.buildProjectButton.addEventListener("click", async () => {
+    await runSelectedSetupAction(helpers, environmentScreen, "build_project", ["make", "c-compiler", "sdl2-dev"]);
+  });
   elements.rebuildProjectButton.addEventListener("click", async () => {
     await runSelectedSetupAction(helpers, environmentScreen, "rebuild_project", ["make", "c-compiler", "sdl2-dev"]);
+  });
+  elements.buildVisualStudioButton.addEventListener("click", async () => {
+    await runSelectedSetupAction(helpers, environmentScreen, "build_project_visual_studio", ["msbuild"]);
   });
   elements.rebuildVisualStudioButton.addEventListener("click", async () => {
     await runSelectedSetupAction(helpers, environmentScreen, "rebuild_project_visual_studio", ["msbuild"]);
   });
-  elements.rebuildTccButton.addEventListener("click", async () => {
-    await runSelectedSetupAction(helpers, environmentScreen, "rebuild_project_tcc", ["tcc"]);
+  elements.buildTccButton.addEventListener("click", async () => {
+    await runSelectedSetupAction(helpers, environmentScreen, "build_project_tcc", ["tcc"]);
   });
 }
 
