@@ -14,6 +14,7 @@ from .dev_tool_processes import (
     read_pid_file,
     remove_pid_file,
     stop_pid,
+    stop_port_listeners,
     stop_process,
     write_pid_file,
 )
@@ -38,7 +39,7 @@ DEFAULT_TOOL = {
 }
 COPY_IGNORES = {".git", "__pycache__"}
 STARTUP_TIMEOUT_SECONDS = 4.0
-STOP_TIMEOUT_SECONDS = 3.0
+STOP_TIMEOUT_SECONDS = 6.0
 RUNNING_TOOLS: dict[str, dict[str, Any]] = {}
 
 
@@ -355,14 +356,17 @@ def stop_running_session(session_id: str) -> None:
     released = lambda: not port_accepts_connections(OVERWORLD_EDITOR_PORT)
     stop_process(process, STOP_TIMEOUT_SECONDS, released)
     stop_pid(read_pid_file(pid_path), STOP_TIMEOUT_SECONDS, released)
-    if released():
-        remove_pid_file(pid_path)
+    stop_port_listeners(OVERWORLD_EDITOR_PORT, STOP_TIMEOUT_SECONDS, released)
+    if not released():
+        raise LauncherError("Overworld Editor did not release port 8086 after shutdown.")
+    remove_pid_file(pid_path)
 
 
 def stop_stale_session(session_id: str) -> None:
     pid_path = pid_path_from_session_id(session_id)
     released = lambda: not port_accepts_connections(OVERWORLD_EDITOR_PORT)
     stop_pid(read_pid_file(pid_path), STOP_TIMEOUT_SECONDS, released)
+    stop_port_listeners(OVERWORLD_EDITOR_PORT, STOP_TIMEOUT_SECONDS, released)
     if released():
         remove_pid_file(pid_path)
 
@@ -376,6 +380,10 @@ def stop_other_sessions(session_id: str) -> None:
 def stop_all_dev_tools() -> None:
     for session_id in list(RUNNING_TOOLS):
         stop_running_session(session_id)
+    released = lambda: not port_accepts_connections(OVERWORLD_EDITOR_PORT)
+    stop_port_listeners(OVERWORLD_EDITOR_PORT, STOP_TIMEOUT_SECONDS, released)
+    if not released():
+        raise LauncherError("Overworld Editor did not release port 8086 after shutdown.")
 
 
 def pid_path_from_session_id(session_id: str) -> Path | None:
