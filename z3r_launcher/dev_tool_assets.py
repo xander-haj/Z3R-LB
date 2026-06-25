@@ -212,7 +212,7 @@ def running_session(session_id: str) -> dict[str, Any] | None:
     process = session.get("process") if session else None
     if process and process.poll() is None and port_accepts_connections(OVERWORLD_EDITOR_PORT):
         return session
-    if process and process.poll() is None:
+    if port_accepts_connections(OVERWORLD_EDITOR_PORT):
         stop_running_session(session_id)
         return None
     remove_pid_file(session.get("pid_path") if session else None)
@@ -352,15 +352,19 @@ def stop_running_session(session_id: str) -> None:
     session = RUNNING_TOOLS.pop(session_id, None)
     process = session.get("process") if session else None
     pid_path = session.get("pid_path") if session else pid_path_from_session_id(session_id)
-    stop_process(process, STOP_TIMEOUT_SECONDS)
-    stop_pid(read_pid_file(pid_path), STOP_TIMEOUT_SECONDS, lambda: not port_accepts_connections(OVERWORLD_EDITOR_PORT))
-    remove_pid_file(pid_path)
+    released = lambda: not port_accepts_connections(OVERWORLD_EDITOR_PORT)
+    stop_process(process, STOP_TIMEOUT_SECONDS, released)
+    stop_pid(read_pid_file(pid_path), STOP_TIMEOUT_SECONDS, released)
+    if released():
+        remove_pid_file(pid_path)
 
 
 def stop_stale_session(session_id: str) -> None:
     pid_path = pid_path_from_session_id(session_id)
-    stop_pid(read_pid_file(pid_path), STOP_TIMEOUT_SECONDS, lambda: not port_accepts_connections(OVERWORLD_EDITOR_PORT))
-    remove_pid_file(pid_path)
+    released = lambda: not port_accepts_connections(OVERWORLD_EDITOR_PORT)
+    stop_pid(read_pid_file(pid_path), STOP_TIMEOUT_SECONDS, released)
+    if released():
+        remove_pid_file(pid_path)
 
 
 def stop_other_sessions(session_id: str) -> None:

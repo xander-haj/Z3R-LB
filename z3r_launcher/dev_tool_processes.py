@@ -46,22 +46,22 @@ def remove_pid_file(path: Path | None) -> None:
         return
 
 
-def stop_process(process: subprocess.Popen | None, timeout: float) -> None:
+def stop_process(
+    process: subprocess.Popen | None,
+    timeout: float,
+    released: Callable[[], bool] | None = None,
+) -> None:
     if not process or process.poll() is not None:
         return
     terminate_pid(process.pid)
-    try:
-        process.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        kill_pid(process.pid)
-        try:
-            process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            return
+    if wait_for_process(process, timeout):
+        return
+    kill_pid(process.pid)
+    wait_for_process_or_release(process, timeout, released)
 
 
 def stop_pid(pid: int | None, timeout: float, released: Callable[[], bool] | None = None) -> None:
-    if not pid or not process_exists(pid):
+    if not pid:
         return
     if released and released():
         return
@@ -81,6 +81,27 @@ def wait_for_release(pid: int, timeout: float, released: Callable[[], bool] | No
     return not process_exists(pid) or bool(released and released())
 
 
+def wait_for_process_or_release(
+    process: subprocess.Popen,
+    timeout: float,
+    released: Callable[[], bool] | None,
+) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if process.poll() is not None or (released and released()):
+            return True
+        time.sleep(0.05)
+    return process.poll() is not None or bool(released and released())
+
+
+def wait_for_process(process: subprocess.Popen, timeout: float) -> bool:
+    try:
+        process.wait(timeout=timeout)
+        return True
+    except subprocess.TimeoutExpired:
+        return process.poll() is not None
+
+
 def process_exists(pid: int) -> bool:
     try:
         os.kill(pid, 0)
@@ -92,18 +113,43 @@ def process_exists(pid: int) -> bool:
 
 
 def terminate_pid(pid: int) -> None:
+    if os.name == "nt":
+        taskkill_pid(pid, force=False)
+        return
     signal_pid(pid, signal.SIGTERM)
 
 
 def kill_pid(pid: int) -> None:
-    signal_pid(pid, signal.SIGKILL if os.name == "posix" else signal.SIGTERM)
+    if os.name == "nt":
+        taskkill_pid(pid, force=True)
+        return
+    signal_pid(pid, signal.SIGKILL)
 
 
 def signal_pid(pid: int, sig: signal.Signals) -> None:
     try:
-        if os.name == "posix":
-            os.killpg(os.getpgid(pid), sig)
-        else:
-            os.kill(pid, sig)
+        os.killpg(os.getpgid(pid), sig)
+    except ProcessLookupError:
+        try:
+            os.killpg(pid, sig)
+        except (LookupError, OSError):
+            return
     except (LookupError, OSError):
+        return
+
+
+def taskkill_pid(pid: int, force: bool) -> None:
+    args = ["taskkill", "/PID", str(pid), "/T"]
+    if force:
+        args.append("/F")
+    try:
+        subprocess.run(
+            args,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            **hidden_subprocess_kwargs(),
+        )
+    except OSError:
         return

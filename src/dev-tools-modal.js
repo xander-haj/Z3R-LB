@@ -235,7 +235,7 @@ async function openDevTool(projectPath, toolId, refs, state, helpers) {
 async function closeRunner(refs, state, helpers) {
   const sessionId = state.sessionId;
   state.sessionId = null;
-  refs.runnerFrame.removeAttribute("src");
+  refs.runnerFrame.src = "about:blank";
   hideHomeButton(refs, state);
   helpers.showView("builds");
   const stopPromise = helpers.call("stop_dev_tool", sessionId ? { sessionId } : {});
