@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import ctypes
 import os
 import signal
 import subprocess
 import sys
 import time
+from ctypes import wintypes
 from pathlib import Path
-from typing import Callable
 
 from .platform_paths import hidden_subprocess_kwargs
 
@@ -47,11 +48,8 @@ def remove_pid_file(path: Path | None) -> None:
         return
 
 
-def stop_process(
-    process: subprocess.Popen | None,
-    timeout: float,
-    released: Callable[[], bool] | None = None,
-) -> None:
+# Send the same first signal a terminal interrupt would send, then escalate only if the process survives.
+def stop_process(process: subprocess.Popen | None, timeout: float) -> None:
     if not process or process.poll() is not None:
         return
     interrupt_pid(process.pid)
@@ -61,44 +59,31 @@ def stop_process(
     if wait_for_process(process, timeout):
         return
     kill_pid(process.pid)
-    wait_for_process_or_release(process, timeout, released)
+    wait_for_process(process, timeout)
 
 
-def stop_pid(pid: int | None, timeout: float, released: Callable[[], bool] | None = None) -> None:
+# Stop a recovered pid without treating port release as success; the process itself must go away.
+def stop_pid(pid: int | None, timeout: float) -> None:
     if not pid:
         return
-    if released and released():
-        return
     interrupt_pid(pid)
-    if wait_for_release(pid, timeout, released):
+    if wait_for_pid_exit(pid, timeout):
         return
     terminate_pid(pid)
-    if wait_for_release(pid, timeout, released):
+    if wait_for_pid_exit(pid, timeout):
         return
     kill_pid(pid)
-    wait_for_release(pid, timeout, released)
+    wait_for_pid_exit(pid, timeout)
 
 
-def wait_for_release(pid: int, timeout: float, released: Callable[[], bool] | None) -> bool:
+# Wait for a pid to disappear so stale listeners cannot be mistaken for a clean shutdown.
+def wait_for_pid_exit(pid: int, timeout: float) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if not process_exists(pid) or (released and released()):
+        if not process_exists(pid):
             return True
         time.sleep(0.05)
-    return not process_exists(pid) or bool(released and released())
-
-
-def wait_for_process_or_release(
-    process: subprocess.Popen,
-    timeout: float,
-    released: Callable[[], bool] | None,
-) -> bool:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if process.poll() is not None or (released and released()):
-            return True
-        time.sleep(0.05)
-    return process.poll() is not None or bool(released and released())
+    return not process_exists(pid)
 
 
 def wait_for_process(process: subprocess.Popen, timeout: float) -> bool:
@@ -109,7 +94,10 @@ def wait_for_process(process: subprocess.Popen, timeout: float) -> bool:
         return process.poll() is not None
 
 
+# Check process existence using the platform-safe mechanism for the current OS.
 def process_exists(pid: int) -> bool:
+    if os.name == "nt":
+        return windows_process_exists(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -119,12 +107,29 @@ def process_exists(pid: int) -> bool:
     return True
 
 
-def stop_port_listeners(port: int, timeout: float, released: Callable[[], bool] | None = None) -> None:
+# Probe Windows process existence with OpenProcess because os.kill(pid, 0) is not a safe no-op there.
+def windows_process_exists(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    process_query_limited_information = 0x1000
+    error_access_denied = 5
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
+    if handle:
+        kernel32.CloseHandle(handle)
+        return True
+    return ctypes.get_last_error() == error_access_denied
+
+
+# Stop every process currently listening on the fixed dev-tool port.
+def stop_port_listeners(port: int, timeout: float) -> None:
     for pid in listening_pids(port):
         if pid != os.getpid():
-            stop_pid(pid, timeout, released)
-            if released and released():
-                return
+            stop_pid(pid, timeout)
 
 
 def listening_pids(port: int) -> list[int]:
