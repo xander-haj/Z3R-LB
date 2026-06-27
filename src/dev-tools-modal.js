@@ -6,12 +6,22 @@ const HOME_REVEAL_TIMEOUT_MS = 2800;
 
 export function connectDevTools(helpers) {
   const refs = ensureDevToolElements();
-  const state = { progress: 0, timer: null, sessionId: null, homeRevealTimer: null, stopPromise: null };
+  const state = {
+    progress: 0,
+    timer: null,
+    sessionId: null,
+    homeRevealTimer: null,
+    stopPromise: null,
+    catalog: null,
+    catalogProjectPath: "",
+    catalogPromise: null,
+    busy: false,
+  };
 
   refs.closeButton.addEventListener("click", () => refs.dialog.close());
-  refs.downloadButton.addEventListener("click", async () => downloadDevTools(refs, helpers));
+  refs.downloadButton.addEventListener("click", async () => downloadDevTools(refs, state, helpers));
   refs.installButton.addEventListener("click", async () => installSelectedTools(refs, state, helpers));
-  refs.repoSelect.addEventListener("change", async () => refreshCatalog(refs, helpers));
+  refs.repoSelect.addEventListener("change", async () => refreshCatalog(refs, state, helpers));
   refs.runnerCloseButton.addEventListener("click", () => {
     void closeRunner(refs, state, helpers).catch((error) => helpers.log(`Could not stop dev tool: ${error}`));
   });
@@ -120,35 +130,48 @@ function handleTriggerKey(event, refs, state, helpers) {
   armTriggerTimeout(state);
   if (state.progress === TRIGGER_KEYS.length) {
     resetTrigger(state);
-    openDialog(refs, helpers);
+    openDialog(refs, state, helpers);
   }
 }
 
-async function openDialog(refs, helpers) {
+async function openDialog(refs, state, helpers) {
   populateRepoOptions(refs, helpers);
   if (!refs.dialog.open) {
     refs.dialog.showModal();
   }
-  await refreshCatalog(refs, helpers);
+  await refreshCatalog(refs, state, helpers);
 }
 
-function populateRepoOptions(refs, helpers) {
+function populateRepoOptions(refs, helpers, preferredPath = "") {
+  const selectedPath = preferredPath || helpers.state.selectedPath || "";
   refs.repoSelect.textContent = "";
   for (const candidate of helpers.state.candidates) {
     const option = document.createElement("option");
     option.value = candidate.path;
     option.textContent = candidate.owner ? `${candidate.owner}/${candidate.name}` : candidate.name;
-    option.selected = candidate.path === helpers.state.selectedPath;
+    option.selected = candidate.path === selectedPath;
     refs.repoSelect.append(option);
   }
 }
 
-async function refreshCatalog(refs, helpers) {
+async function refreshCatalog(refs, state, helpers) {
+  const promise = refreshCatalogNow(refs, state, helpers);
+  if (state) {
+    state.catalogPromise = promise;
+  }
+  return promise;
+}
+
+async function refreshCatalogNow(refs, state, helpers) {
   const projectPath = selectedRepoPath(refs);
   clearDevToolsVerification(refs);
+  if (state) {
+    state.catalog = null;
+    state.catalogProjectPath = projectPath;
+  }
   refs.status.textContent = projectPath ? "Reading dev tools..." : "Select or clone a repo first.";
   refs.list.textContent = "";
-  refs.installButton.disabled = !projectPath;
+  updateDevToolControls(refs, state, { reading: true });
 
   if (!projectPath) {
     return;
@@ -156,12 +179,21 @@ async function refreshCatalog(refs, helpers) {
 
   try {
     const catalog = await helpers.call("read_dev_tools", { projectPath });
+    if (selectedRepoPath(refs) !== projectPath) {
+      return;
+    }
+    if (state) {
+      state.catalog = catalog;
+      state.catalogProjectPath = projectPath;
+    }
     refs.status.textContent = catalog.shared_available
       ? `Downloaded source: ${catalog.shared_repo}`
       : `Source not downloaded yet: ${catalog.source_url}`;
     renderToolList(refs, catalog.tools);
   } catch (error) {
     refs.status.textContent = String(error);
+  } finally {
+    updateDevToolControls(refs, state);
   }
 }
 
@@ -181,6 +213,14 @@ function renderToolList(refs, tools) {
   }
 }
 
+function updateDevToolControls(refs, state, options = {}) {
+  const busy = Boolean(state?.busy);
+  const reading = Boolean(options.reading);
+  refs.repoSelect.disabled = busy;
+  refs.downloadButton.disabled = busy;
+  refs.installButton.disabled = busy || reading || !selectedRepoPath(refs) || selectedToolIds(refs).length === 0;
+}
+
 function toolStatusText(tool) {
   const state = tool.installed ? "Installed" : tool.available ? "Ready to install" : "Download required";
   const versions = [];
@@ -193,8 +233,12 @@ function toolStatusText(tool) {
   return versions.length ? `${state} | ${versions.join(" | ")}` : state;
 }
 
-async function downloadDevTools(refs, helpers) {
-  refs.downloadButton.disabled = true;
+async function downloadDevTools(refs, state, helpers) {
+  if (state.busy) {
+    return;
+  }
+  state.busy = true;
+  updateDevToolControls(refs, state);
   clearDevToolsVerification(refs);
   refs.status.textContent = "Downloading dev tools...";
   try {
@@ -202,7 +246,8 @@ async function downloadDevTools(refs, helpers) {
     helpers.log(result.message);
     refs.status.textContent = result.message;
     if (result.ok && result.verified === true) {
-      await refreshCatalog(refs, helpers);
+      populateRepoOptions(refs, helpers, selectedRepoPath(refs));
+      await refreshCatalog(refs, state, helpers);
       showDevToolsVerification(refs, "Download/update succeeded. Install Selected to update the target repo.");
     } else {
       showDevToolsFailure(refs, unverifiedDownloadMessage(result));
@@ -211,19 +256,30 @@ async function downloadDevTools(refs, helpers) {
     refs.status.textContent = String(error);
     showDevToolsFailure(refs, `Download/update failed: ${error}`);
   } finally {
-    refs.downloadButton.disabled = false;
+    state.busy = false;
+    updateDevToolControls(refs, state);
   }
 }
 
 async function installSelectedTools(refs, state, helpers) {
+  if (state.busy) {
+    return;
+  }
+  await settleCatalogRefresh(state);
   const projectPath = selectedRepoPath(refs);
+  if (!projectPath) {
+    refs.status.textContent = "Select a repo and at least one downloaded tool.";
+    return;
+  }
+  await ensureFreshCatalog(refs, state, helpers, projectPath);
   const toolIds = selectedToolIds(refs);
-  if (!projectPath || toolIds.length === 0) {
+  if (toolIds.length === 0) {
     refs.status.textContent = "Select a repo and at least one downloaded tool.";
     return;
   }
 
-  refs.installButton.disabled = true;
+  state.busy = true;
+  updateDevToolControls(refs, state);
   clearDevToolsVerification(refs);
   try {
     let installedMessage = "Installed selected dev tool.";
@@ -233,21 +289,37 @@ async function installSelectedTools(refs, state, helpers) {
       refs.status.textContent = result.message;
       if (!result.ok || result.verified !== true) {
         showDevToolsFailure(refs, unverifiedInstallMessage(result));
-        refs.installButton.disabled = false;
         return;
       }
       refreshRunningToolFrame(refs, state, result);
       installedMessage = result.message || installedMessage;
     }
     await refreshAfterVerifiedInstall(refs, helpers);
-    await refreshCatalog(refs, helpers);
+    populateRepoOptions(refs, helpers, projectPath);
+    await refreshCatalog(refs, state, helpers);
     showDevToolsVerification(refs, installedMessage);
   } catch (error) {
     refs.status.textContent = String(error);
     showDevToolsFailure(refs, `Install failed: ${error}`);
   } finally {
-    refs.installButton.disabled = false;
+    state.busy = false;
+    updateDevToolControls(refs, state);
   }
+}
+
+async function settleCatalogRefresh(state) {
+  if (!state.catalogPromise) {
+    return;
+  }
+  await state.catalogPromise.catch(() => {});
+}
+
+async function ensureFreshCatalog(refs, state, helpers, projectPath) {
+  if (state.catalog && state.catalogProjectPath === projectPath) {
+    return;
+  }
+  await refreshCatalog(refs, state, helpers);
+  await settleCatalogRefresh(state);
 }
 
 function unverifiedDownloadMessage(result) {

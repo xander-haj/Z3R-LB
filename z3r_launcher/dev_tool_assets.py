@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -43,25 +44,32 @@ INSTALL_PURGE_NAMES = {"__pycache__"}
 STARTUP_TIMEOUT_SECONDS = 4.0
 STOP_TIMEOUT_SECONDS = 1.0
 RUNNING_TOOLS: dict[str, dict[str, Any]] = {}
+DEV_TOOL_LOCK = threading.RLock()
 
 
 def read_dev_tools(project_path: str | None = None) -> dict[str, Any]:
-    project = Path(project_path) if project_path else None
-    shared = shared_dev_tool_repo()
-    installed_dir = project_tool_dir(project, DEFAULT_TOOL) if project else Path()
-    available = tool_files_available(shared, DEFAULT_TOOL)
-    installed = tool_files_available(installed_dir, DEFAULT_TOOL) if project else False
-    tool = tool_snapshot(DEFAULT_TOOL, available, installed, shared, installed_dir)
-    return {
-        "storage_dir": display_path(shared_dev_tools_root()),
-        "source_url": DEV_TOOLS_SOURCE_URL,
-        "shared_repo": display_path(shared),
-        "shared_available": available,
-        "tools": [tool],
-    }
+    with DEV_TOOL_LOCK:
+        project = Path(project_path) if project_path else None
+        shared = shared_dev_tool_repo()
+        installed_dir = project_tool_dir(project, DEFAULT_TOOL) if project else Path()
+        available = tool_files_available(shared, DEFAULT_TOOL)
+        installed = tool_files_available(installed_dir, DEFAULT_TOOL) if project else False
+        tool = tool_snapshot(DEFAULT_TOOL, available, installed, shared, installed_dir)
+        return {
+            "storage_dir": display_path(shared_dev_tools_root()),
+            "source_url": DEV_TOOLS_SOURCE_URL,
+            "shared_repo": display_path(shared),
+            "shared_available": available,
+            "tools": [tool],
+        }
 
 
 def clone_dev_tools() -> dict[str, Any]:
+    with DEV_TOOL_LOCK:
+        return clone_dev_tools_locked()
+
+
+def clone_dev_tools_locked() -> dict[str, Any]:
     storage = shared_dev_tools_root()
     destination = shared_dev_tool_repo()
     storage.mkdir(parents=True, exist_ok=True)
@@ -93,6 +101,11 @@ def clone_dev_tools() -> dict[str, Any]:
 
 
 def install_dev_tool(project_path: str, tool_id: str) -> dict[str, Any]:
+    with DEV_TOOL_LOCK:
+        return install_dev_tool_locked(project_path, tool_id)
+
+
+def install_dev_tool_locked(project_path: str, tool_id: str) -> dict[str, Any]:
     tool = require_tool(tool_id)
     source = shared_dev_tool_repo()
     if not tool_files_available(source, tool):
@@ -147,6 +160,11 @@ def installed_dev_tools(project_path: Path | str) -> list[dict[str, str]]:
 
 
 def launch_dev_tool(project_path: str, tool_id: str) -> dict[str, Any]:
+    with DEV_TOOL_LOCK:
+        return launch_dev_tool_locked(project_path, tool_id)
+
+
+def launch_dev_tool_locked(project_path: str, tool_id: str) -> dict[str, Any]:
     tool = require_tool(tool_id)
     project = require_project(project_path)
     tool_dir = project_tool_dir(project, tool)
@@ -170,11 +188,12 @@ def launch_dev_tool(project_path: str, tool_id: str) -> dict[str, Any]:
 
 
 def stop_dev_tool(session_id: str | None = None) -> dict[str, Any]:
-    if session_id:
-        stop_running_session(session_id)
-    else:
-        stop_all_dev_tools()
-    return action_result(True, "Dev tool stopped.")
+    with DEV_TOOL_LOCK:
+        if session_id:
+            stop_running_session(session_id)
+        else:
+            stop_all_dev_tools()
+        return action_result(True, "Dev tool stopped.")
 
 
 def active_dev_tool_project() -> Path | None:
