@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import atexit
+import json
 import os
 import subprocess
 import time
@@ -34,6 +35,7 @@ DEFAULT_TOOL = {
     "repo_name": OVERWORLD_EDITOR_REPO,
     "entry_file": "index.html",
     "server_file": "server.py",
+    "manifest_file": "tool-manifest.json",
 }
 COPY_IGNORES = {".git", "__pycache__"}
 STARTUP_TIMEOUT_SECONDS = 4.0
@@ -44,9 +46,10 @@ RUNNING_TOOLS: dict[str, dict[str, Any]] = {}
 def read_dev_tools(project_path: str | None = None) -> dict[str, Any]:
     project = Path(project_path) if project_path else None
     shared = shared_dev_tool_repo()
+    installed_dir = project_tool_dir(project, DEFAULT_TOOL) if project else Path()
     available = tool_files_available(shared, DEFAULT_TOOL)
-    installed = tool_files_available(project_tool_dir(project, DEFAULT_TOOL), DEFAULT_TOOL) if project else False
-    tool = tool_snapshot(DEFAULT_TOOL, available, installed)
+    installed = tool_files_available(installed_dir, DEFAULT_TOOL) if project else False
+    tool = tool_snapshot(DEFAULT_TOOL, available, installed, shared, installed_dir)
     return {
         "storage_dir": display_path(shared_dev_tools_root()),
         "source_url": DEV_TOOLS_SOURCE_URL,
@@ -160,14 +163,34 @@ def shared_dev_tool_repo() -> Path:
     return shared_dev_tools_root() / OVERWORLD_EDITOR_REPO
 
 
-def tool_snapshot(tool: dict[str, str], available: bool, installed: bool) -> dict[str, Any]:
+def tool_snapshot(
+    tool: dict[str, str],
+    available: bool,
+    installed: bool,
+    shared_dir: Path,
+    installed_dir: Path,
+) -> dict[str, Any]:
     return {
         "id": tool["id"],
         "label": tool["label"],
         "repo_name": tool["repo_name"],
         "available": available,
         "installed": installed,
+        "source_version": tool_manifest_version(shared_dir, tool) if available else None,
+        "installed_version": tool_manifest_version(installed_dir, tool) if installed else None,
     }
+
+
+def tool_manifest_version(folder: Path, tool: dict[str, str]) -> str | None:
+    manifest_name = tool.get("manifest_file")
+    if not manifest_name:
+        return None
+    try:
+        data = json.loads((folder / manifest_name).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    version = str(data.get("version") or "").strip()
+    return f"v{version.removeprefix('v')}" if version else None
 
 
 def require_tool(tool_id: str) -> dict[str, str]:

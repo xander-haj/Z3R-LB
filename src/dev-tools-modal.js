@@ -49,6 +49,7 @@ function ensureDevToolElements() {
       </label>
       <div id="devToolsStatus" class="dev-tools-status"></div>
       <div id="devToolsList" class="dev-tools-list"></div>
+      <div id="devToolsVerification" class="operation-verification hidden" role="status" aria-live="polite"></div>
       <div class="dev-tools-actions">
         <button id="devToolsDownloadButton" class="secondary-button" type="button">Download / Update</button>
         <button id="devToolsInstallButton" class="primary-button" type="button">Install Selected</button>
@@ -83,6 +84,7 @@ function ensureDevToolElements() {
     repoSelect: dialog.querySelector("#devToolsRepoSelect"),
     status: dialog.querySelector("#devToolsStatus"),
     list: dialog.querySelector("#devToolsList"),
+    verification: dialog.querySelector("#devToolsVerification"),
     downloadButton: dialog.querySelector("#devToolsDownloadButton"),
     installButton: dialog.querySelector("#devToolsInstallButton"),
     closeButton: dialog.querySelector("#devToolsCloseButton"),
@@ -143,6 +145,7 @@ function populateRepoOptions(refs, helpers) {
 
 async function refreshCatalog(refs, helpers) {
   const projectPath = selectedRepoPath(refs);
+  clearDevToolsVerification(refs);
   refs.status.textContent = projectPath ? "Reading dev tools..." : "Select or clone a repo first.";
   refs.list.textContent = "";
   refs.installButton.disabled = !projectPath;
@@ -171,15 +174,28 @@ function renderToolList(refs, tools) {
       <input type="checkbox" value="${escapeHtml(tool.id)}" ${tool.available ? "checked" : "disabled"} />
       <span>
         <strong>${escapeHtml(tool.label)}</strong>
-        <small>${tool.installed ? "Installed" : tool.available ? "Ready to install" : "Download required"}</small>
+        <small>${escapeHtml(toolStatusText(tool))}</small>
       </span>
     `;
     refs.list.append(row);
   }
 }
 
+function toolStatusText(tool) {
+  const state = tool.installed ? "Installed" : tool.available ? "Ready to install" : "Download required";
+  const versions = [];
+  if (tool.installed_version) {
+    versions.push(`installed ${tool.installed_version}`);
+  }
+  if (tool.source_version) {
+    versions.push(`source ${tool.source_version}`);
+  }
+  return versions.length ? `${state} | ${versions.join(" | ")}` : state;
+}
+
 async function downloadDevTools(refs, helpers) {
   refs.downloadButton.disabled = true;
+  clearDevToolsVerification(refs);
   refs.status.textContent = "Downloading dev tools...";
   try {
     const result = await helpers.call("clone_dev_tools");
@@ -187,9 +203,13 @@ async function downloadDevTools(refs, helpers) {
     refs.status.textContent = result.message;
     if (result.ok) {
       await refreshCatalog(refs, helpers);
+      showDevToolsVerification(refs, "Download/update succeeded. Install Selected to update the target repo.");
+    } else {
+      showDevToolsFailure(refs, result.message || "Download/update failed.");
     }
   } catch (error) {
     refs.status.textContent = String(error);
+    showDevToolsFailure(refs, `Download/update failed: ${error}`);
   } finally {
     refs.downloadButton.disabled = false;
   }
@@ -204,19 +224,47 @@ async function installSelectedTools(refs, helpers) {
   }
 
   refs.installButton.disabled = true;
+  clearDevToolsVerification(refs);
   try {
+    let installedMessage = "Installed selected dev tool.";
     for (const toolId of toolIds) {
       const result = await helpers.call("install_dev_tool", { projectPath, toolId });
       helpers.log(result.message);
       refs.status.textContent = result.message;
+      if (!result.ok) {
+        showDevToolsFailure(refs, result.message || "Install failed.");
+        refs.installButton.disabled = false;
+        return;
+      }
+      installedMessage = result.message || installedMessage;
     }
     await helpers.refreshScan();
     await refreshCatalog(refs, helpers);
+    showDevToolsVerification(refs, installedMessage);
   } catch (error) {
     refs.status.textContent = String(error);
+    showDevToolsFailure(refs, `Install failed: ${error}`);
   } finally {
     refs.installButton.disabled = false;
   }
+}
+
+function showDevToolsVerification(refs, message) {
+  refs.verification.textContent = `✓ ${message}`;
+  refs.verification.classList.remove("failed");
+  refs.verification.classList.remove("hidden");
+}
+
+function showDevToolsFailure(refs, message) {
+  refs.verification.textContent = message;
+  refs.verification.classList.add("failed");
+  refs.verification.classList.remove("hidden");
+}
+
+function clearDevToolsVerification(refs) {
+  refs.verification.textContent = "";
+  refs.verification.classList.remove("failed");
+  refs.verification.classList.add("hidden");
 }
 
 async function openDevTool(projectPath, toolId, refs, state, helpers) {
