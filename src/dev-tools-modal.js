@@ -10,7 +10,7 @@ export function connectDevTools(helpers) {
 
   refs.closeButton.addEventListener("click", () => refs.dialog.close());
   refs.downloadButton.addEventListener("click", async () => downloadDevTools(refs, helpers));
-  refs.installButton.addEventListener("click", async () => installSelectedTools(refs, helpers));
+  refs.installButton.addEventListener("click", async () => installSelectedTools(refs, state, helpers));
   refs.repoSelect.addEventListener("change", async () => refreshCatalog(refs, helpers));
   refs.runnerCloseButton.addEventListener("click", () => {
     void closeRunner(refs, state, helpers).catch((error) => helpers.log(`Could not stop dev tool: ${error}`));
@@ -201,11 +201,11 @@ async function downloadDevTools(refs, helpers) {
     const result = await helpers.call("clone_dev_tools");
     helpers.log(result.message);
     refs.status.textContent = result.message;
-    if (result.ok) {
+    if (result.ok && result.verified === true) {
       await refreshCatalog(refs, helpers);
       showDevToolsVerification(refs, "Download/update succeeded. Install Selected to update the target repo.");
     } else {
-      showDevToolsFailure(refs, result.message || "Download/update failed.");
+      showDevToolsFailure(refs, unverifiedDownloadMessage(result));
     }
   } catch (error) {
     refs.status.textContent = String(error);
@@ -215,7 +215,7 @@ async function downloadDevTools(refs, helpers) {
   }
 }
 
-async function installSelectedTools(refs, helpers) {
+async function installSelectedTools(refs, state, helpers) {
   const projectPath = selectedRepoPath(refs);
   const toolIds = selectedToolIds(refs);
   if (!projectPath || toolIds.length === 0) {
@@ -231,14 +231,15 @@ async function installSelectedTools(refs, helpers) {
       const result = await helpers.call("install_dev_tool", { projectPath, toolId });
       helpers.log(result.message);
       refs.status.textContent = result.message;
-      if (!result.ok) {
-        showDevToolsFailure(refs, result.message || "Install failed.");
+      if (!result.ok || result.verified !== true) {
+        showDevToolsFailure(refs, unverifiedInstallMessage(result));
         refs.installButton.disabled = false;
         return;
       }
+      refreshRunningToolFrame(refs, state, result);
       installedMessage = result.message || installedMessage;
     }
-    await helpers.refreshScan();
+    await refreshAfterVerifiedInstall(refs, helpers);
     await refreshCatalog(refs, helpers);
     showDevToolsVerification(refs, installedMessage);
   } catch (error) {
@@ -247,6 +248,41 @@ async function installSelectedTools(refs, helpers) {
   } finally {
     refs.installButton.disabled = false;
   }
+}
+
+function unverifiedDownloadMessage(result) {
+  if (result.ok) {
+    return "Download/update completed, but the downloaded source files did not verify.";
+  }
+  return result.message || "Download/update failed.";
+}
+
+function unverifiedInstallMessage(result) {
+  if (result.ok) {
+    return "Install completed, but the selected repo files did not verify.";
+  }
+  return result.message || "Install failed.";
+}
+
+async function refreshAfterVerifiedInstall(refs, helpers) {
+  try {
+    await helpers.refreshScan();
+  } catch (error) {
+    helpers.log(`Install verified, but repo refresh failed: ${error}`);
+    refs.status.textContent = `Install verified, but repo refresh failed: ${error}`;
+  }
+}
+
+function refreshRunningToolFrame(refs, state, result) {
+  if (!result.restarted || !result.embed_url || result.session_id !== state.sessionId) {
+    return;
+  }
+  refs.runnerFrame.src = cacheBustedUrl(result.embed_url, result.installed_version || Date.now());
+}
+
+function cacheBustedUrl(url, value) {
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}installed=${encodeURIComponent(value)}`;
 }
 
 function showDevToolsVerification(refs, message) {
