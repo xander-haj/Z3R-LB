@@ -28,7 +28,7 @@ from .processes import (
     python_program,
     run_command,
 )
-from .project_files import copy_dir_contents, folder_matches_all_files, rom_storage_dir, venv_python
+from .project_files import folder_matches_all_files, rom_storage_dir, venv_python
 
 
 DEFAULT_TOOL = {
@@ -40,7 +40,6 @@ DEFAULT_TOOL = {
     "manifest_file": "tool-manifest.json",
 }
 COPY_IGNORES = {".git", "__pycache__"}
-INSTALL_PURGE_NAMES = {"__pycache__"}
 STARTUP_TIMEOUT_SECONDS = 4.0
 STOP_TIMEOUT_SECONDS = 1.0
 RUNNING_TOOLS: dict[str, dict[str, Any]] = {}
@@ -121,9 +120,7 @@ def install_dev_tool_locked(project_path: str, tool_id: str) -> dict[str, Any]:
     if restart_after_install:
         stop_running_session(session_id)
 
-    removed = remove_stale_tool_files(source, destination, COPY_IGNORES)
-    copied = copy_dir_contents(source, destination, COPY_IGNORES)
-    verify_installed_tool(source, destination)
+    copied = overwrite_installed_tool(source, destination)
 
     restarted_url = None
     if restart_after_install:
@@ -132,12 +129,11 @@ def install_dev_tool_locked(project_path: str, tool_id: str) -> dict[str, Any]:
     result = action_result(
         True,
         installed_tool_message(tool, destination, restart_after_install),
-        install_detail(copied, removed, restart_after_install),
+        install_detail(copied, restart_after_install),
     )
     result.update({
         "verified": True,
         "copied": copied,
-        "removed": removed,
         "restarted": restart_after_install,
         "session_id": session_id if restart_after_install else None,
         "url": restarted_url,
@@ -257,34 +253,49 @@ def ensure_install_destination(destination: Path) -> None:
         raise LauncherError(f"Install path exists but is not a folder: {display_path(destination)}")
 
 
-def remove_stale_tool_files(source: Path, destination: Path, ignored_names: set[str]) -> int:
-    if not destination.exists():
-        return 0
-    removed = 0
-    for child in list(destination.iterdir()):
-        if child.name in INSTALL_PURGE_NAMES:
-            remove_installed_child(child)
-            removed += 1
-            continue
+def overwrite_installed_tool(source: Path, destination: Path) -> int:
+    try:
+        destination.mkdir(parents=True, exist_ok=True)
+        copied = overwrite_dir_contents(source, destination, COPY_IGNORES)
+        remove_extra_installed_files(source, destination, COPY_IGNORES)
+        verify_installed_tool(source, destination)
+    except OSError as error:
+        raise LauncherError(f"Could not overwrite installed Overworld Editor files: {error}") from error
+    return copied
+
+
+def overwrite_dir_contents(source: Path, destination: Path, ignored_names: set[str]) -> int:
+    copied = 0
+    for child in source.iterdir():
         if child.name in ignored_names:
             continue
+        target = destination / child.name
+        if child.is_dir():
+            if target.exists() and (not target.is_dir() or target.is_symlink()):
+                remove_installed_child(target)
+            target.mkdir(parents=True, exist_ok=True)
+            copied += overwrite_dir_contents(child, target, ignored_names)
+        elif child.is_file():
+            if target.exists() and target.is_dir():
+                remove_installed_child(target)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(child, target)
+            copied += 1
+    return copied
+
+
+def remove_extra_installed_files(source: Path, destination: Path, ignored_names: set[str]) -> None:
+    for child in list(destination.iterdir()):
         source_child = source / child.name
-        if should_remove_installed_child(source_child, child):
+        if child.name in ignored_names or not source_child.exists():
             remove_installed_child(child)
-            removed += 1
         elif child.is_dir():
-            removed += remove_stale_tool_files(source_child, child, ignored_names)
-    return removed
-
-
-def should_remove_installed_child(source: Path, destination: Path) -> bool:
-    if not source.exists():
-        return True
-    if destination.is_dir():
-        return not source.is_dir()
-    if destination.is_file():
-        return not source.is_file()
-    return True
+            if source_child.is_dir() and not child.is_symlink():
+                remove_extra_installed_files(source_child, child, ignored_names)
+            else:
+                remove_installed_child(child)
+        elif not source_child.is_file():
+            remove_installed_child(child)
 
 
 def remove_installed_child(path: Path) -> None:
@@ -297,23 +308,21 @@ def remove_installed_child(path: Path) -> None:
 def verify_installed_tool(source: Path, destination: Path) -> None:
     if not folder_matches_all_files(source, destination, COPY_IGNORES):
         raise LauncherError("Installed Overworld Editor files did not match the downloaded source.")
-    if installed_folder_has_stale_files(source, destination, COPY_IGNORES):
+    if installed_folder_has_extra_files(source, destination, COPY_IGNORES):
         raise LauncherError("Installed Overworld Editor still contains stale files from an older source.")
 
 
-def installed_folder_has_stale_files(source: Path, destination: Path, ignored_names: set[str]) -> bool:
+def installed_folder_has_extra_files(source: Path, destination: Path, ignored_names: set[str]) -> bool:
     if not destination.is_dir():
         return True
     for child in destination.iterdir():
-        if child.name in INSTALL_PURGE_NAMES:
-            return True
         if child.name in ignored_names:
-            continue
+            return True
         source_child = source / child.name
         if not source_child.exists():
             return True
         if child.is_dir():
-            if not source_child.is_dir() or installed_folder_has_stale_files(source_child, child, ignored_names):
+            if not source_child.is_dir() or installed_folder_has_extra_files(source_child, child, ignored_names):
                 return True
         elif child.is_file():
             if not source_child.is_file():
@@ -329,10 +338,12 @@ def installed_tool_message(tool: dict[str, str], destination: Path, restarted: b
     return f"Installed {tool['label']} into {display_path(destination)}."
 
 
-def install_detail(copied: int, removed: int, restarted: bool) -> str:
-    lines = [f"{copied} file(s) copied.", "Verified installed files match the downloaded source."]
-    if removed:
-        lines.insert(1, f"{removed} stale file(s) or folder(s) removed.")
+def install_detail(copied: int, restarted: bool) -> str:
+    lines = [
+        f"{copied} file(s) overwritten in the selected repo.",
+        "Removed stale installed files that are not in the downloaded source.",
+        "Verified installed files match the downloaded source.",
+    ]
     if restarted:
         lines.append("Restarted the running Overworld Editor session.")
     return "\n".join(lines)
